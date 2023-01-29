@@ -35,10 +35,10 @@ python_build:
 	$(PYTHON) setup.py bdist_wheel
 python_sdist:
 	$(PYTHON) setup.py sdist
-	# tar -tvf dist/pybind11_rdp-*.tar.gz
+	# tar -tvf dist/geocondense-*.tar.gz
 python_test:
-	$(PYTHON) -c 'from pybind11_rdp import rdp; print(rdp([[1, 1], [2, 2], [3, 3], [4, 4]]))'
-	$(PYTHON) test.py
+	pytest --capture=tee-sys tests
+test: python_test
 
 # conda create -y -n py36 python=3.6
 # conda create -y -n py37 python=3.7
@@ -73,8 +73,8 @@ upload_wheels:
 	twine upload dist/*.whl -r $(pypi_remote)
 
 tar.gz:
-	tar -cvz --exclude .git -f ../pybind11-rdp.tar.gz .
-	ls -alh ../pybind11-rdp.tar.gz
+	tar -cvz --exclude .git -f ../geocondense.tar.gz .
+	ls -alh ../geocondense.tar.gz
 
 # https://stackoverflow.com/a/25817631
 echo-%  : ; @echo -n $($*)
