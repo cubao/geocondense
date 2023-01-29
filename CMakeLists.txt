@@ -20,13 +20,19 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 endif()
 
-include_directories(BEFORE ${PROJECT_SOURCE_DIR}/headers/include)
+include_directories(
+  ${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}/h3/src/h3lib/include
+  ${PROJECT_SOURCE_DIR}/headers/include)
 
-set(CMAKE_CXX_STANDARD 14)
-set(PYBIND11_CPP_STANDARD -std=c++14)
+configure_file(h3/src/h3lib/include/h3api.h.in ${PROJECT_BINARY_DIR}/h3api.h)
+file(GLOB H3SOURCES h3/src/h3lib/lib/*.c)
+# add_library(h3 STATIC ${H3SOURCES})
 
+set(CMAKE_CXX_STANDARD 17)
+set(PYBIND11_CPP_STANDARD -std=c++17)
 add_subdirectory(pybind11)
-pybind11_add_module(pybind11_geocondense src/main.cpp)
+pybind11_add_module(pybind11_geocondense src/main.cpp ${H3SOURCES})
 
+# target_link_libraries(pybind11_geocondense h3)
 target_compile_definitions(pybind11_geocondense
                            PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})

@@ -118,6 +118,12 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_temp)
 
 
+with open("requirements.txt") as f:
+    lines = f.readlines()
+install_requires = [
+    line.strip() for line in lines if line and not line.startswith("--")
+]
+
 # The information here can also be placed in setup.cfg - better separation of
 # logic and declaration, and simpler if you include description/version in a file.
 setup(
@@ -133,6 +139,6 @@ setup(
     ext_modules=[CMakeExtension("pybind11_geocondense")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
-    install_requires=["numpy"],
+    install_requires=install_requires,
     extras_require={"test": ["pytest>=6.0"]},
 )
