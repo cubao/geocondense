@@ -26,7 +26,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(PYBIND11_CPP_STANDARD -std=c++14)
 
 add_subdirectory(pybind11)
-pybind11_add_module(geocondense src/main.cpp)
+pybind11_add_module(pybind11_geocondense src/main.cpp)
 
-target_compile_definitions(geocondense
+target_compile_definitions(pybind11_geocondense
                            PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})

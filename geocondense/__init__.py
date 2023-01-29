@@ -1,0 +1,2 @@
+from pybind11_geocondense import __version__
+from pybind11_geocondense import *

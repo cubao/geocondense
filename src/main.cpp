@@ -16,7 +16,7 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 
-PYBIND11_MODULE(geocondense, m)
+PYBIND11_MODULE(pybind11_geocondense, m)
 {
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
