@@ -35,6 +35,7 @@
 
 namespace py = pybind11;
 using namespace pybind11::literals;
+using namespace cubao;
 
 using RapidjsonValue = mapbox::geojson::rapidjson_value;
 using RapidjsonAllocator = mapbox::geojson::rapidjson_allocator;
@@ -126,8 +127,7 @@ heading_pitch_roll(const mapbox::geojson::value &extrinsic)
     auto &lla = p->second.get<mapbox::geojson::value::array_type>();
     auto &wxyz = q->second.get<mapbox::geojson::value::array_type>();
     Eigen::Matrix3d R_enu_local =
-        cubao::R_ecef_enu(lla[0].get<double>(), lla[1].get<double>())
-            .transpose() *
+        R_ecef_enu(lla[0].get<double>(), lla[1].get<double>()).transpose() *
         Eigen::Quaterniond(wxyz[0].get<double>(), wxyz[1].get<double>(),
                            wxyz[2].get<double>(), wxyz[3].get<double>())
             .toRotationMatrix();
@@ -166,6 +166,95 @@ struct CondenseOptions
     bool grid_features_keep_properties = false;
 };
 
+inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
+                           std::vector<Eigen::Vector3d> &positions,
+                           std::map<int, RowVectors> &polylines)
+{
+    geom.match(
+        [&](const mapbox::geojson::line_string &ls) {
+            auto llas = douglas_simplify(
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
+                true);
+            positions.push_back(llas.row(llas.rows() / 2));
+            polylines.emplace(index, std::move(llas));
+        },
+        [&](const mapbox::geojson::point &g) {
+            positions.push_back({g.x, g.y, g.z});
+        },
+        [&](const mapbox::geojson::multi_point &g) {
+            Eigen::Vector3d p =
+                Eigen::Map<const RowVectors>(&g[0].x, g.size(), 3)
+                    .colwise()
+                    .mean();
+            positions.push_back(p);
+        },
+        [&](const mapbox::geojson::polygon &g) {
+            auto &ls = g[0];
+            auto llas = douglas_simplify(
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
+                true);
+            positions.push_back(llas.row(llas.rows() / 2));
+            polylines.emplace(index, std::move(llas));
+        },
+        [&](const mapbox::geojson::multi_line_string &g) {
+            auto &ls = g[0];
+            auto llas = douglas_simplify(
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
+                true);
+            positions.push_back(llas.row(llas.rows() / 2));
+            polylines.emplace(index, std::move(llas));
+        },
+        [&](const mapbox::geojson::multi_polygon &g) {
+            auto &ls = g[0][0];
+            auto llas = douglas_simplify(
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
+                true);
+            positions.push_back(llas.row(llas.rows() / 2));
+            polylines.emplace(index, std::move(llas));
+        },
+        [&](const mapbox::geojson::geometry_collection &g) {
+            index_geometry(index, g[0], positions, polylines);
+        },
+        [&](const auto &g) {
+            throw std::invalid_argument(
+                fmt::format("failed to index {}th geometry", index));
+        });
+}
+
+inline RapidjsonValue
+row_vectors_to_json(const Eigen::Ref<const RowVectors> &coords,
+                    RapidjsonAllocator &allocator)
+{
+    RapidjsonValue arr(rapidjson::kArrayType);
+    arr.Reserve(coords.rows(), allocator);
+    for (int i = 0, N = coords.rows(); i < N; ++i) {
+        RapidjsonValue xyz(rapidjson::kArrayType);
+        xyz.Reserve(3, allocator);
+        xyz.PushBack(RapidjsonValue(coords(i, 0)), allocator);
+        xyz.PushBack(RapidjsonValue(coords(i, 1)), allocator);
+        xyz.PushBack(RapidjsonValue(coords(i, 2)), allocator);
+        arr.PushBack(xyz, allocator);
+    }
+    return arr;
+}
+
+RapidjsonValue
+index_geojson(const mapbox::geojson::feature_collection &_features)
+{
+    RapidjsonAllocator allocator;
+
+    RapidjsonValue index(rapidjson::kObjectType);
+    std::vector<Eigen::Vector3d> positions;
+    std::map<int, RowVectors> polylines;
+    for (int i = 0; i < _features.size(); ++i) {
+        auto &f = _features[i];
+        index_geometry(i, f.geometry, positions, polylines);
+    }
+    for (auto &pair : _features.custom_properties) {
+    }
+    return index;
+}
+
 RapidjsonValue
 strip_geojson(const mapbox::geojson::feature_collection &_features,
               double douglas_epsilon)
@@ -180,13 +269,12 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
         RapidjsonValue properties(rapidjson::kObjectType);
         f.geometry.match(
             [&](const mapbox::geojson::line_string &ls) {
-                auto llas = cubao::douglas_simplify(
-                    Eigen::Map<const cubao::RowVectors>(&ls[0].x, ls.size(), 3),
+                auto llas = douglas_simplify(
+                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3),
                     douglas_epsilon, true);
                 mapbox::geojson::line_string geom;
                 geom.resize(llas.rows());
-                Eigen::Map<cubao::RowVectors>(&geom[0].x, geom.size(), 3) =
-                    llas;
+                Eigen::Map<RowVectors>(&geom[0].x, geom.size(), 3) = llas;
                 feature.AddMember(
                     "geometry",
                     mapbox::geojson::convert(
@@ -194,9 +282,8 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
                     allocator);
             },
             [&](const mapbox::geojson::multi_point &mp) {
-                Eigen::Map<const cubao::RowVectors> llas(&mp[0].x, mp.size(),
-                                                         3);
-                const auto enus = cubao::lla2enu(llas);
+                Eigen::Map<const RowVectors> llas(&mp[0].x, mp.size(), 3);
+                const auto enus = lla2enu(llas);
                 Eigen::Vector3d center = llas.colwise().mean();
                 auto geom = mapbox::geojson::convert(
                     mapbox::geojson::geometry{mapbox::geojson::point{
@@ -383,13 +470,14 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
 }
 
 bool condense_geojson(const std::string &input_path,
+                      const std::optional<std::string> &output_index_path,
                       const std::optional<std::string> &output_strip_path,
                       const std::optional<std::string> &output_grids_dir,
                       const CondenseOptions &options)
 {
-    if (!output_strip_path && !output_grids_dir) {
-        spdlog::error(
-            "should specify either --output_strip_path or --output_grids_dir");
+    if (!output_index_path && !output_strip_path && !output_grids_dir) {
+        spdlog::error("should specify either --output_index_path, "
+                      "--output_strip_path or --output_grids_dir");
         return false;
     }
     auto json = load_json(input_path);
@@ -409,6 +497,9 @@ bool condense_geojson(const std::string &input_path,
     if (features.empty()) {
         spdlog::error("not any features in {}", input_path);
         return false;
+    }
+    if (output_index_path) {
+        auto stripped = index_geojson(features);
     }
     if (output_strip_path) {
         auto stripped = strip_geojson(features, options.douglas_epsilon);
