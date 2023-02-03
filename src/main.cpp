@@ -9,186 +9,445 @@
 #include <pybind11/eigen.h>
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
+
+#include <optional>
+
+#include <mapbox/geojson_impl.hpp>
+#include <mapbox/geojson_value_impl.hpp>
+
+#include "rapidjson/error/en.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/stringbuffer.h"
+
+#include "h3api.h"
+#include "cubao/polyline_ruler.hpp"
+#include "spdlog/spdlog.h"
+
+#include <unordered_map>
+#include <set>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
-struct LineSegment
+namespace py = pybind11;
+using namespace pybind11::literals;
+
+using RapidjsonValue = mapbox::geojson::rapidjson_value;
+using RapidjsonAllocator = mapbox::geojson::rapidjson_allocator;
+using RapidjsonDocument = mapbox::geojson::rapidjson_document;
+
+constexpr const auto RJFLAGS = rapidjson::kParseDefaultFlags |      //
+                               rapidjson::kParseCommentsFlag |      //
+                               rapidjson::kParseFullPrecisionFlag | //
+                               rapidjson::kParseTrailingCommasFlag;
+
+inline RapidjsonValue load_json(FILE *fp)
 {
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    const Eigen::Vector3d A, B, AB;
-    const double len2, inv_len2;
-    LineSegment(const Eigen::Vector3d &a, const Eigen::Vector3d &b)
-        : A(a), B(b), AB(b - a), //
-          len2((b - a).squaredNorm()), inv_len2(1.0 / len2)
-    {
+    char readBuffer[65536];
+    rapidjson::FileReadStream is(fp, readBuffer, sizeof(readBuffer));
+    RapidjsonDocument d;
+    d.ParseStream<RJFLAGS>(is);
+    fclose(fp);
+    return RapidjsonValue{std::move(d.Move())};
+}
+inline RapidjsonValue load_json(const std::string &path)
+{
+    FILE *fp = fopen(path.c_str(), "rb");
+    if (!fp) {
+        return {};
     }
-    double distance2(const Eigen::Vector3d &P) const
-    {
-        double dot = (P - A).dot(AB);
-        if (dot <= 0) {
-            return (P - A).squaredNorm();
-        } else if (dot >= len2) {
-            return (P - B).squaredNorm();
+    return load_json(fp);
+}
+
+inline void sort_keys_inplace(RapidjsonValue &json)
+{
+    if (json.IsArray()) {
+        for (auto &e : json.GetArray()) {
+            sort_keys_inplace(e);
         }
-        // P' = A + dot/length * normed(AB)
-        //    = A + dot * AB / (length^2)
-        return (A + (dot * inv_len2 * AB) - P).squaredNorm();
+    } else if (json.IsObject()) {
+        auto obj = json.GetObject();
+        // https://rapidjson.docsforge.com/master/sortkeys.cpp/
+        std::sort(obj.MemberBegin(), obj.MemberEnd(), [](auto &lhs, auto &rhs) {
+            return strcmp(lhs.name.GetString(), rhs.name.GetString()) < 0;
+        });
+        for (auto &kv : obj) {
+            sort_keys_inplace(kv.value);
+        }
     }
-    double distance(const Eigen::Vector3d &P) const
-    {
-        return std::sqrt(distance2(P));
+}
+
+bool dump_json(FILE *fp, const RapidjsonValue &json, bool indent = false)
+{
+    using namespace rapidjson;
+    char writeBuffer[65536];
+    FileWriteStream os(fp, writeBuffer, sizeof(writeBuffer));
+    if (indent) {
+        PrettyWriter<FileWriteStream> writer(os);
+        json.Accept(writer);
+    } else {
+        Writer<FileWriteStream> writer(os);
+        json.Accept(writer);
     }
+    fclose(fp);
+    return true;
+}
+
+inline bool dump_json(const std::string &path, const RapidjsonValue &json,
+                      bool indent)
+{
+    FILE *fp = fopen(path.c_str(), "wb");
+    if (!fp) {
+        return false;
+    }
+    return dump_json(fp, json, indent);
+}
+
+// https://cesium.com/learn/cesiumjs/ref-doc/HeadingPitchRoll.html
+std::optional<Eigen::Vector3d>
+heading_pitch_roll(const mapbox::geojson::value &extrinsic)
+{
+    if (!extrinsic.is<mapbox::geojson::value::object_type>()) {
+        return {};
+    }
+    auto &obj = extrinsic.get<mapbox::geojson::value::object_type>();
+    auto q = obj.find("Rwc_quat_wxyz");
+    if (q == obj.end()) {
+        return {};
+    }
+    auto p = obj.find("center");
+    if (p == obj.end()) {
+        return {};
+    }
+    auto &lla = p->second.get<mapbox::geojson::value::array_type>();
+    auto &wxyz = q->second.get<mapbox::geojson::value::array_type>();
+    Eigen::Matrix3d R_enu_local =
+        cubao::R_ecef_enu(lla[0].get<double>(), lla[1].get<double>())
+            .transpose() *
+        Eigen::Quaterniond(wxyz[0].get<double>(), wxyz[1].get<double>(),
+                           wxyz[2].get<double>(), wxyz[3].get<double>())
+            .toRotationMatrix();
+    Eigen::Vector3d hpr = R_enu_local.eulerAngles(2, 1, 0);
+    hpr[0] *= -1.0;
+    hpr[1] *= -1.0;
+    hpr *= 180.0 / M_PI;
+    return Eigen::round(hpr.array() * 100.0) / 100.0;
+}
+
+bool setup_extrinsic_to_heading_pitch_roll(
+    const mapbox::geojson::prop_map &properties, //
+    RapidjsonValue &output,                      //
+    RapidjsonAllocator &allocator)
+{
+    auto extrinsic_itr = properties.find("extrinsic");
+    if (extrinsic_itr == properties.end()) {
+        return false;
+    }
+    auto hpr = heading_pitch_roll(extrinsic_itr->second);
+    if (!hpr) {
+        return false;
+    }
+    output.AddMember("heading", RapidjsonValue((*hpr)[0]), allocator);
+    output.AddMember("pitch", RapidjsonValue((*hpr)[1]), allocator);
+    output.AddMember("roll", RapidjsonValue((*hpr)[2]), allocator);
+    return true;
+}
+
+struct CondenseOptions
+{
+    double douglas_epsilon = 0.4; // meters
+    int h3_resolution = 8; // https://h3geo.org/docs/core-library/restable/
+    bool indent = false;
+    bool sort_keys = false;
+    bool grid_features_keep_properties = false;
 };
 
-using RowVectors = Eigen::Matrix<double, Eigen::Dynamic, 3, Eigen::RowMajor>;
-using RowVectorsNx3 = RowVectors;
-using RowVectorsNx2 = Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>;
-
-void douglas_simplify(const Eigen::Ref<const RowVectors> &coords,
-                      Eigen::VectorXi &to_keep, const int i, const int j,
-                      const double epsilon)
+RapidjsonValue
+strip_geojson(const mapbox::geojson::feature_collection &_features,
+              double douglas_epsilon)
 {
-    to_keep[i] = to_keep[j] = 1;
-    if (j - i <= 1) {
-        return;
-    }
-    LineSegment line(coords.row(i), coords.row(j));
-    double max_dist2 = 0.0;
-    int max_index = i;
-    for (int k = i + 1; k < j; ++k) {
-        double dist2 = line.distance2(coords.row(k));
-        if (dist2 > max_dist2) {
-            max_dist2 = dist2;
-            max_index = k;
+    RapidjsonAllocator allocator;
+    RapidjsonValue features(rapidjson::kArrayType);
+    features.Reserve(_features.size(), allocator);
+    int index = -1;
+    for (auto &f : _features) {
+        RapidjsonValue feature(rapidjson::kObjectType);
+        feature.AddMember("type", "Feature", allocator);
+        RapidjsonValue properties(rapidjson::kObjectType);
+        f.geometry.match(
+            [&](const mapbox::geojson::line_string &ls) {
+                auto llas = cubao::douglas_simplify(
+                    Eigen::Map<const cubao::RowVectors>(&ls[0].x, ls.size(), 3),
+                    douglas_epsilon, true);
+                mapbox::geojson::line_string geom;
+                geom.resize(llas.rows());
+                Eigen::Map<cubao::RowVectors>(&geom[0].x, geom.size(), 3) =
+                    llas;
+                feature.AddMember(
+                    "geometry",
+                    mapbox::geojson::convert(
+                        mapbox::geojson::geometry{std::move(geom)}, allocator),
+                    allocator);
+            },
+            [&](const mapbox::geojson::multi_point &mp) {
+                Eigen::Map<const cubao::RowVectors> llas(&mp[0].x, mp.size(),
+                                                         3);
+                const auto enus = cubao::lla2enu(llas);
+                Eigen::Vector3d center = llas.colwise().mean();
+                auto geom = mapbox::geojson::convert(
+                    mapbox::geojson::geometry{mapbox::geojson::point{
+                        center[0], center[1], center[2]}},
+                    allocator);
+                feature.AddMember("geometry", geom, allocator);
+                Eigen::Array3d span = Eigen::round((enus.colwise().maxCoeff() -
+                                                    enus.colwise().minCoeff())
+                                                       .array() *
+                                                   100.0) /
+                                      100.0;
+                if (!span.isZero()) {
+                    RapidjsonValue span_xyz(rapidjson::kArrayType);
+                    span_xyz.Reserve(3, allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[0]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[1]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[2]), allocator);
+                    properties.AddMember("size", span_xyz, allocator);
+                }
+            },
+            [&](const auto &g) {
+                auto geom = mapbox::geojson::convert(f.geometry, allocator);
+                feature.AddMember("geometry", geom, allocator);
+            });
+        auto type_itr = f.properties.find("type");
+        if (type_itr != f.properties.end() &&
+            type_itr->second.is<std::string>()) {
+            auto &type = type_itr->second.get<std::string>();
+            properties.AddMember(
+                "type",                                               //
+                RapidjsonValue(type.c_str(), type.size(), allocator), //
+                allocator);
         }
+        properties.AddMember("index", RapidjsonValue(++index), allocator);
+        setup_extrinsic_to_heading_pitch_roll(f.properties, properties,
+                                              allocator);
+        feature.AddMember("properties", properties, allocator);
+        features.PushBack(feature, allocator);
     }
-    if (max_dist2 <= epsilon * epsilon) {
-        return;
-    }
-    douglas_simplify(coords, to_keep, i, max_index, epsilon);
-    douglas_simplify(coords, to_keep, max_index, j, epsilon);
+    RapidjsonValue geojson(rapidjson::kObjectType);
+    geojson.AddMember("type", "FeatureCollection", allocator);
+    geojson.AddMember("features", features, allocator);
+    return geojson;
 }
 
-Eigen::VectorXi
-douglas_simplify_mask(const Eigen::Ref<const RowVectors> &coords,
-                      double epsilon)
+inline uint64_t h3index(int resolution, double lon, double lat)
 {
-    Eigen::VectorXi mask(coords.rows());
-    mask.setZero();
-    douglas_simplify(coords, mask, 0, mask.size() - 1, epsilon);
-    return mask;
+    LatLng coord;
+    coord.lng = lon / 180.0 * M_PI;
+    coord.lat = lat / 180.0 * M_PI;
+    H3Index idx;
+    latLngToCell(&coord, resolution, &idx);
+    return idx;
 }
 
-Eigen::VectorXi mask2indexes(const Eigen::Ref<const Eigen::VectorXi> &mask)
+inline std::set<uint64_t>
+h3index(int resolution, const std::vector<mapbox::geojson::point> &geometry)
 {
-    Eigen::VectorXi indexes(mask.sum());
-    for (int i = 0, j = 0, N = mask.size(); i < N; ++i) {
-        if (mask[i]) {
-            indexes[j++] = i;
-        }
-    }
-    return indexes;
-}
-
-Eigen::VectorXi
-douglas_simplify_indexes(const Eigen::Ref<const RowVectors> &coords,
-                         double epsilon)
-{
-    return mask2indexes(douglas_simplify_mask(coords, epsilon));
-}
-
-RowVectors select_by_mask(const Eigen::Ref<const RowVectors> &coords,
-                          const Eigen::Ref<const Eigen::VectorXi> &mask)
-{
-    RowVectors ret(mask.sum(), coords.cols());
-    int N = mask.size();
-    for (int i = 0, k = 0; i < N; ++i) {
-        if (mask[i]) {
-            ret.row(k++) = coords.row(i);
-        }
+    std::set<uint64_t> ret;
+    for (auto &g : geometry) {
+        ret.insert(h3index(resolution, g.x, g.y));
     }
     return ret;
 }
 
-inline RowVectors douglas_simplify(const Eigen::Ref<const RowVectors> &coords,
-                                   double epsilon)
+inline std::set<uint64_t> h3index(int resolution,
+                                  const mapbox::geojson::geometry &geometry)
 {
-    return select_by_mask(coords, douglas_simplify_mask(coords, epsilon));
+    std::set<uint64_t> ret;
+    geometry.match(
+        [&](const mapbox::geojson::line_string &ls) {
+            auto cur = h3index(resolution, ls);
+            ret.insert(cur.begin(), cur.end());
+        },
+        [&](const mapbox::geojson::multi_point &mp) {
+            auto cur = h3index(resolution, mp);
+            ret.insert(cur.begin(), cur.end());
+        },
+        [&](const mapbox::geojson::point &p) {
+            ret.insert(h3index(resolution, p.x, p.y));
+        },
+        [&](const mapbox::geojson::multi_line_string &mls) {
+            for (auto &ls : mls) {
+                auto cur = h3index(resolution, ls);
+                ret.insert(cur.begin(), cur.end());
+            }
+        },
+        [&](const mapbox::geojson::polygon &g) {
+            for (auto &r : g) {
+                auto cur = h3index(resolution, r);
+                ret.insert(cur.begin(), cur.end());
+            }
+        },
+        [&](const mapbox::geojson::multi_polygon &g) {
+            for (auto &p : g) {
+                for (auto &r : p) {
+                    auto cur = h3index(resolution, r);
+                    ret.insert(cur.begin(), cur.end());
+                }
+            }
+        },
+        [&](const mapbox::geojson::geometry_collection &gc) {
+            for (auto &g : gc) {
+                auto cur = h3index(resolution, g);
+                ret.insert(cur.begin(), cur.end());
+            }
+        },
+        [&](const auto &g) {
+            //
+        });
+    return ret;
 }
 
-namespace py = pybind11;
-using namespace pybind11::literals;
-
-PYBIND11_MODULE(pybind11_rdp, m)
+bool gridify_geojson(const mapbox::geojson::feature_collection &features,
+                     const std::string &output_grids_dir,
+                     const CondenseOptions &options)
 {
-    m.doc() = R"pbdoc(
-        c++/pybind11 version of Ramer-Douglas-Peucker (rdp) algorithm
-        -------------------------------------------------------------
+    std::unordered_map<int, std::set<uint64_t>> index2h3index;
+    std::unordered_map<uint64_t, std::vector<int>> h3index2index;
+    for (int i = 0; i < features.size(); ++i) {
+        auto &f = features[i];
+        auto h3idxes = h3index(options.h3_resolution, f.geometry);
+        for (auto h3idx : h3idxes) {
+            h3index2index[h3idx].push_back(i);
+        }
+        index2h3index.emplace(i, std::move(h3idxes));
+    }
+    mapbox::geojson::feature_collection copy;
+    const mapbox::geojson::feature_collection *fc_ptr = &copy;
+    if (options.grid_features_keep_properties) {
+        fc_ptr = &features;
+    } else {
+        copy.reserve(features.size());
+        for (auto &f : features) {
+            auto ff = mapbox::geojson::feature{f.geometry};
+            auto type_itr = f.properties.find("type");
+            if (type_itr != f.properties.end()) {
+                ff.properties.emplace("type", type_itr->second);
+            }
+            auto id_itr = f.properties.find("id");
+            if (id_itr != f.properties.end()) {
+                ff.properties.emplace("id", id_itr->second);
+            }
+            auto stroke_itr = f.properties.find("stroke");
+            if (stroke_itr != f.properties.end()) {
+                ff.properties.emplace("stroke", stroke_itr->second);
+            }
+            copy.emplace_back(std::move(ff));
+        }
+    }
+    for (const auto &pair : h3index2index) {
+        auto h3idx = pair.first;
+        auto &indexes = pair.second;
+        auto fc = mapbox::geojson::feature_collection{};
+        fc.reserve(indexes.size());
+        for (auto idx : indexes) {
+            fc.push_back((*fc_ptr)[idx]);
+        }
 
-        .. currentmodule:: pybind11_rdp
+        RapidjsonAllocator allocator;
+        auto json = mapbox::geojson::convert(fc, allocator);
+        int i = -1;
+        for (auto idx : indexes) {
+            auto &props = json["features"][++i]["properties"];
+            setup_extrinsic_to_heading_pitch_roll(features[idx].properties, //
+                                                  props, allocator);
+            props.GetObject().AddMember("index", RapidjsonValue(idx),
+                                        allocator);
+        }
+        if (options.sort_keys) {
+            sort_keys_inplace(json);
+        }
+        std::string path =
+            fmt::format("{}/h3_cell_{}_{:016x}.json", output_grids_dir,
+                        options.h3_resolution, h3idx);
+        spdlog::info("writing {} features to {}", fc.size(), path);
+        if (!dump_json(path, json, options.indent)) {
+            spdlog::error("failed to write {} features (h3idx: {}) to {}",
+                          fc.size(), h3idx, path);
+            return false;
+        }
+    }
+    return true;
+}
 
-        .. autosummary::
-           :toctree: _generate
+bool condense_geojson(const std::string &input_path,
+                      const std::optional<std::string> &output_strip_path,
+                      const std::optional<std::string> &output_grids_dir,
+                      const CondenseOptions &options)
+{
+    if (!output_strip_path && !output_grids_dir) {
+        spdlog::error(
+            "should specify either --output_strip_path or --output_grids_dir");
+        return false;
+    }
+    auto json = load_json(input_path);
+    if (!json.IsObject()) {
+        spdlog::error("failed to load {}", input_path);
+        return false;
+    }
+    auto geojson = mapbox::geojson::convert(json);
+    if (geojson.is<mapbox::geojson::geometry>()) {
+        geojson = mapbox::geojson::feature_collection{
+            mapbox::geojson::feature{geojson.get<mapbox::geojson::geometry>()}};
+    } else if (geojson.is<mapbox::geojson::feature>()) {
+        geojson = mapbox::geojson::feature_collection{
+            {geojson.get<mapbox::geojson::feature>()}};
+    }
+    auto &features = geojson.get<mapbox::geojson::feature_collection>();
+    if (features.empty()) {
+        spdlog::error("not any features in {}", input_path);
+        return false;
+    }
+    if (output_strip_path) {
+        auto stripped = strip_geojson(features, options.douglas_epsilon);
+        if (options.sort_keys) {
+            sort_keys_inplace(stripped);
+        }
+        spdlog::info("writing to {}", *output_strip_path);
+        if (!dump_json(*output_strip_path, stripped, options.indent)) {
+            spdlog::error("failed to dump to {}", *output_strip_path);
+            return false;
+        }
+    }
+    if (output_grids_dir) {
+        return gridify_geojson(features, *output_grids_dir, options);
+    }
+    return true;
+}
 
-           rdp
-           rdp_mask
-    )pbdoc";
-
-    py::class_<LineSegment>(m, "LineSegment") //
-        .def(py::init<const Eigen::Vector3d, const Eigen::Vector3d>(), "A"_a,
-             "B"_a)
-        .def("distance", &LineSegment::distance, "P"_a)
-        .def("distance2", &LineSegment::distance2, "P"_a)
+PYBIND11_MODULE(pybind11_geocondense, m)
+{
+    py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
+        .def(py::init<>())
+        .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon)
+        .def_readwrite("h3_resolution", &CondenseOptions::h3_resolution)
+        .def_readwrite("indent", &CondenseOptions::indent)
+        .def_readwrite("sort_keys", &CondenseOptions::sort_keys)
+        .def_readwrite("grid_features_keep_properties",
+                       &CondenseOptions::grid_features_keep_properties)
         //
         ;
 
-    auto rdp_doc = R"pbdoc(
-        Simplifies a given array of points using the Ramer-Douglas-Peucker algorithm.
-
-        Example:
-        >>> from pybind11_rdp import rdp
-        >>> rdp([[1, 1], [2, 2], [3, 3], [4, 4]])
-        [[1, 1], [4, 4]]
-    )pbdoc";
-
-    m.def(
-        "rdp",
-        [](const Eigen::Ref<const RowVectors> &coords, double epsilon)
-            -> RowVectors { return douglas_simplify(coords, epsilon); },
-        rdp_doc, "coords"_a, py::kw_only(), "epsilon"_a = 0.0);
-    m.def(
-        "rdp",
-        [](const Eigen::Ref<const RowVectorsNx2> &coords,
-           double epsilon) -> RowVectorsNx2 {
-            RowVectors xyzs(coords.rows(), 3);
-            xyzs.setZero();
-            xyzs.leftCols(2) = coords;
-            return douglas_simplify(xyzs, epsilon).leftCols(2);
-        },
-        rdp_doc, "coords"_a, py::kw_only(), "epsilon"_a = 0.0);
-
-    auto rdp_mask_doc = R"pbdoc(
-        Simplifies a given array of points using the Ramer-Douglas-Peucker algorithm.
-        return a mask.
-    )pbdoc";
-    m.def(
-        "rdp_mask",
-        [](const Eigen::Ref<const RowVectors> &coords,
-           double epsilon) -> Eigen::VectorXi {
-            return douglas_simplify_mask(coords, epsilon);
-        },
-        rdp_mask_doc, "coords"_a, py::kw_only(), "epsilon"_a = 0.0);
-    m.def(
-        "rdp_mask",
-        [](const Eigen::Ref<const RowVectorsNx2> &coords,
-           double epsilon) -> Eigen::VectorXi {
-            RowVectors xyzs(coords.rows(), 3);
-            xyzs.setZero();
-            xyzs.leftCols(2) = coords;
-            return douglas_simplify_mask(xyzs, epsilon);
-        },
-        rdp_mask_doc, "coords"_a, py::kw_only(), "epsilon"_a = 0.0);
+    m.def("condense_geojson", &condense_geojson, //
+          py::kw_only(),                         //
+          "input_path"_a,                        //
+          "output_strip_path"_a = std::nullopt,  //
+          "output_grids_dir"_a = std::nullopt,   //
+          "options"_a = CondenseOptions())
+        //
+        ;
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
