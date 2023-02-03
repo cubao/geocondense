@@ -139,7 +139,8 @@ heading_pitch_roll(const mapbox::geojson::value &extrinsic)
 }
 
 bool setup_extrinsic_to_heading_pitch_roll(
-    const mapbox::geojson::prop_map &properties, RapidjsonValue &output,
+    const mapbox::geojson::prop_map &properties, //
+    RapidjsonValue &output,                      //
     RapidjsonAllocator &allocator)
 {
     auto extrinsic_itr = properties.find("extrinsic");
@@ -172,9 +173,11 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
     RapidjsonAllocator allocator;
     RapidjsonValue features(rapidjson::kArrayType);
     features.Reserve(_features.size(), allocator);
+    int index = -1;
     for (auto &f : _features) {
         RapidjsonValue feature(rapidjson::kObjectType);
         feature.AddMember("type", "Feature", allocator);
+        RapidjsonValue properties(rapidjson::kObjectType);
         f.geometry.match(
             [&](const mapbox::geojson::line_string &ls) {
                 auto llas = cubao::douglas_simplify(
@@ -190,18 +193,44 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
                         mapbox::geojson::geometry{std::move(geom)}, allocator),
                     allocator);
             },
+            [&](const mapbox::geojson::multi_point &mp) {
+                Eigen::Map<const cubao::RowVectors> llas(&mp[0].x, mp.size(),
+                                                         3);
+                const auto enus = cubao::lla2enu(llas);
+                Eigen::Vector3d center = llas.colwise().mean();
+                auto geom = mapbox::geojson::convert(
+                    mapbox::geojson::geometry{mapbox::geojson::point{
+                        center[0], center[1], center[2]}},
+                    allocator);
+                feature.AddMember("geometry", geom, allocator);
+                Eigen::Array3d span = Eigen::round((enus.colwise().maxCoeff() -
+                                                    enus.colwise().minCoeff())
+                                                       .array() *
+                                                   100.0) /
+                                      100.0;
+                if (!span.isZero()) {
+                    RapidjsonValue span_xyz(rapidjson::kArrayType);
+                    span_xyz.Reserve(3, allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[0]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[1]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[2]), allocator);
+                    properties.AddMember("size", span_xyz, allocator);
+                }
+            },
             [&](const auto &g) {
                 auto geom = mapbox::geojson::convert(f.geometry, allocator);
                 feature.AddMember("geometry", geom, allocator);
             });
-        RapidjsonValue properties(rapidjson::kObjectType);
         auto type_itr = f.properties.find("type");
         if (type_itr != f.properties.end() &&
             type_itr->second.is<std::string>()) {
             auto &type = type_itr->second.get<std::string>();
             properties.AddMember(
-                "type", RapidjsonValue(type.c_str(), type.size()), allocator);
+                "type",                                               //
+                RapidjsonValue(type.c_str(), type.size(), allocator), //
+                allocator);
         }
+        properties.AddMember("index", RapidjsonValue(++index), allocator);
         setup_extrinsic_to_heading_pitch_roll(f.properties, properties,
                                               allocator);
         feature.AddMember("properties", properties, allocator);
@@ -216,8 +245,8 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
 inline uint64_t h3index(int resolution, double lon, double lat)
 {
     LatLng coord;
-    coord.lng = degsToRads(lon);
-    coord.lat = degsToRads(lat);
+    coord.lng = lon / 180.0 * M_PI;
+    coord.lat = lat / 180.0 * M_PI;
     H3Index idx;
     latLngToCell(&coord, resolution, &idx);
     return idx;
@@ -329,18 +358,21 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
 
         RapidjsonAllocator allocator;
         auto json = mapbox::geojson::convert(fc, allocator);
-        if (options.sort_keys) {
-            sort_keys_inplace(json);
-        }
         int i = -1;
         for (auto idx : indexes) {
-            setup_extrinsic_to_heading_pitch_roll(
-                features[idx].properties, json["features"][++i]["properties"],
-                allocator);
+            auto &props = json["features"][++i]["properties"];
+            setup_extrinsic_to_heading_pitch_roll(features[idx].properties, //
+                                                  props, allocator);
+            props.GetObject().AddMember("index", RapidjsonValue(idx),
+                                        allocator);
+        }
+        if (options.sort_keys) {
+            sort_keys_inplace(json);
         }
         std::string path =
             fmt::format("{}/h3_cell_{}_{:016x}.json", output_grids_dir,
                         options.h3_resolution, h3idx);
+        spdlog::info("writing {} features to {}", fc.size(), path);
         if (!dump_json(path, json, options.indent)) {
             spdlog::error("failed to write {} features (h3idx: {}) to {}",
                           fc.size(), h3idx, path);
@@ -383,6 +415,7 @@ bool condense_geojson(const std::string &input_path,
         if (options.sort_keys) {
             sort_keys_inplace(stripped);
         }
+        spdlog::info("writing to {}", *output_strip_path);
         if (!dump_json(*output_strip_path, stripped, options.indent)) {
             spdlog::error("failed to dump to {}", *output_strip_path);
             return false;
