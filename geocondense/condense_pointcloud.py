@@ -8,32 +8,36 @@ import open3d as o3d
 import polyline_ruler.tf as tf
 from concave_hull import concave_hull_indexes
 from loguru import logger
+from pybind11_rdp import rdp_mask
 from scipy.spatial import ConvexHull
 
 
 def condense_pointcloud_impl(
     *,
     pcd: o3d.geometry.PointCloud,
-    output_voxel_path: str,
-    output_grids_dir: str,
+    output_fence_path: Optional[str] = None,
+    output_grids_dir: Optional[str] = None,
     wgs84_epsilon: float = 0.01,
 ):
+    assert (
+        output_fence_path or output_grids_dir
+    ), f"should specify either --output_fence_path or --output_grids_dir"
+    if output_fence_path:
+        assert output_fence_path.endswith(
+            ".json"
+        ), f"invalid voxel dump: {output_fence_path}, should be a json file"
     wgs84_scale = 1 / wgs84_epsilon
     assert wgs84_scale == int(wgs84_scale), f"bad wgs84_epsilon: {wgs84_epsilon}"
     wgs84_scale = int(wgs84_scale)
 
-    assert output_voxel_path.endswith(
-        ".json"
-    ), f"invalid voxel dump: {output_voxel_path}, should be a json file"
-    output_grids_dir = os.path.abspath(output_grids_dir)
-    os.makedirs(output_grids_dir, exist_ok=True)
-
     ecefs = np.asarray(pcd.points)
     assert len(ecefs), f"not any points in pointcloud"
     R = np.linalg.norm(ecefs[0])
-    assert R > 6300 * 1000, f"data not on earth surface, R is: {R}"
+    assert (
+        R > 6300 * 1000
+    ), f"data (should be in ECEF) not on earth? (forgot to specify --center?), R is: {R}"
     anchor = np.round(tf.ecef2lla(*ecefs[0]), 2)
-    anchor[:2] = (round(l * wgs84_scale) / wgs84_scale for l in anchor[:2])
+    anchor[:2] = [round(l * wgs84_scale) / wgs84_scale for l in anchor[:2]]
     anchor[2] = 0.0
     anchor_text = "_".join([str(x) for x in anchor])
 
@@ -44,7 +48,9 @@ def condense_pointcloud_impl(
     pmin = pcd.get_min_bound()
     pmax = pcd.get_max_bound()
     lla_bounds = tf.enu2lla(
-        [pmin - 10.0, pmax + 10.0], anchor_lla=anchor, cheap_ruler=False
+        [pmin - 10.0, pmax + 10.0],
+        anchor_lla=anchor,
+        cheap_ruler=False,
     )
     lon0, lat0 = lla_bounds[0][:2]
     lon1, lat1 = lla_bounds[1][:2]
@@ -65,9 +71,10 @@ def condense_pointcloud_impl(
         cheap_ruler=False,
     )[:, 1]
 
-    # pcd1 = pcd.voxel_down_sample(1.0)
     pcd1, _, idxes = pcd.voxel_down_sample_and_trace(
-        1.0, min_bound=pmin, max_bound=pmax
+        1.0,
+        min_bound=pmin,
+        max_bound=pmax,
     )
     idxes = [np.array(i) for i in idxes]
     xyzs = np.asarray(pcd1.points)
@@ -76,10 +83,10 @@ def condense_pointcloud_impl(
     points = np.array(
         [
             *xyzs,
-            *(xyzs + [+1, 0, 0]),
-            *(xyzs + [-1, 0, 0]),
-            *(xyzs + [0, +1, 0]),
-            *(xyzs + [0, -1, 0]),
+            *(xyzs + [+0.1, 0, 0]),
+            *(xyzs + [-0.1, 0, 0]),
+            *(xyzs + [0, +0.1, 0]),
+            *(xyzs + [0, -0.1, 0]),
         ]
     )
     convex_hull = ConvexHull(points[:, :2])
@@ -90,8 +97,12 @@ def condense_pointcloud_impl(
     )
     concave_hull = [*concave_hull, concave_hull[0]]
     llas = tf.enu2lla(points[concave_hull], anchor_lla=anchor)
-    with open(output_voxel_path, "w") as f:
-        logger.info(f"wrote to {output_voxel_path}")
+    llas[:, :2] = llas[:, :2].round(6)
+    llas[:, 2] = llas[:, 2].round(1)
+    mask = rdp_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
+    llas = llas[mask]
+    with open(output_fence_path, "w") as f:
+        logger.info(f"writing to {output_fence_path}")
         json.dump(
             {
                 "type": "FeatureCollection",
@@ -105,8 +116,9 @@ def condense_pointcloud_impl(
                         "properties": {
                             "type": "pointcloud",
                             "#points": len(enus),
+                            "#voxels": len(xyzs),
                             "lla_bounds": lla_bounds.tolist(),
-                            "enu_bounds": [pmin.tolist(), pmax.tolist()],
+                            "enu_bounds": (pmax - pmin).round(2).tolist(),
                         },
                     }
                 ],
@@ -115,6 +127,10 @@ def condense_pointcloud_impl(
             indent=4,
         )
 
+    if not output_grids_dir:
+        return
+    output_grids_dir = os.path.abspath(output_grids_dir)
+    os.makedirs(output_grids_dir, exist_ok=True)
     for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):
         for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):
             mask = np.logical_and(
@@ -140,11 +156,14 @@ def condense_pointcloud_impl(
 def condense_pointcloud(
     *,
     input_path: str,
-    output_voxel_path: str,
-    output_grids_dir: str,
+    output_fence_path: Optional[str] = None,
+    output_grids_dir: Optional[str] = None,
     wgs84_epsilon: float = 0.01,
     center: Optional[Tuple[float, float, float]] = None,
 ):
+    assert (
+        output_fence_path or output_grids_dir
+    ), f"should specify either --output_fence_path or --output_grids_dir"
     pcd = o3d.io.read_point_cloud(input_path)
     if center:
         if isinstance(center, str):
@@ -154,7 +173,7 @@ def condense_pointcloud(
         pcd.transform(tf.T_ecef_enu(lon=lon, lat=lat, alt=alt))
     return condense_pointcloud_impl(
         pcd=pcd,
-        output_voxel_path=output_voxel_path,
+        output_fence_path=output_fence_path,
         output_grids_dir=output_grids_dir,
         wgs84_epsilon=wgs84_epsilon,
     )

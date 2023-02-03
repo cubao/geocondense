@@ -9,6 +9,10 @@
 #include <pybind11/eigen.h>
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
+
+#include <optional>
 
 #include <mapbox/geojson_impl.hpp>
 #include <mapbox/geojson_value_impl.hpp>
@@ -347,10 +351,15 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
 }
 
 bool condense_geojson(const std::string &input_path,
-                      const std::string &output_strip_path,
-                      const std::string &output_grids_dir,
+                      const std::optional<std::string> &output_strip_path,
+                      const std::optional<std::string> &output_grids_dir,
                       const CondenseOptions &options)
 {
+    if (!output_strip_path && !output_grids_dir) {
+        spdlog::error(
+            "should specify either --output_strip_path or --output_grids_dir");
+        return false;
+    }
     auto json = load_json(input_path);
     if (!json.IsObject()) {
         spdlog::error("failed to load {}", input_path);
@@ -369,15 +378,20 @@ bool condense_geojson(const std::string &input_path,
         spdlog::error("not any features in {}", input_path);
         return false;
     }
-    auto stripped = strip_geojson(features, options.douglas_epsilon);
-    if (options.sort_keys) {
-        sort_keys_inplace(stripped);
+    if (output_strip_path) {
+        auto stripped = strip_geojson(features, options.douglas_epsilon);
+        if (options.sort_keys) {
+            sort_keys_inplace(stripped);
+        }
+        if (!dump_json(*output_strip_path, stripped, options.indent)) {
+            spdlog::error("failed to dump to {}", *output_strip_path);
+            return false;
+        }
     }
-    if (!dump_json(output_strip_path, stripped, options.indent)) {
-        spdlog::error("failed to dump to {}", output_strip_path);
-        return false;
+    if (output_grids_dir) {
+        return gridify_geojson(features, *output_grids_dir, options);
     }
-    return gridify_geojson(features, output_grids_dir, options);
+    return true;
 }
 
 PYBIND11_MODULE(pybind11_geocondense, m)
@@ -396,8 +410,8 @@ PYBIND11_MODULE(pybind11_geocondense, m)
     m.def("condense_geojson", &condense_geojson, //
           py::kw_only(),                         //
           "input_path"_a,                        //
-          "output_strip_path"_a,                 //
-          "output_grids_dir"_a,                  //
+          "output_strip_path"_a = std::nullopt,  //
+          "output_grids_dir"_a = std::nullopt,   //
           "options"_a = CondenseOptions())
         //
         ;

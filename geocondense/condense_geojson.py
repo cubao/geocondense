@@ -7,8 +7,8 @@ from geocondense import condense_geojson as condense_geojson_impl
 def condense_geojson(
     *,
     input_path: str,
-    output_strip_path: str,
-    output_grids_dir: str,
+    output_strip_path: str = None,
+    output_grids_dir: str = None,
     douglas_epsilon: float = 0.4,
     h3_resolution: int = 8,
     indent: bool = False,

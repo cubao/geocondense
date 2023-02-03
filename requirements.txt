@@ -4,4 +4,5 @@ loguru
 numpy
 open3d
 polyline_ruler
+pybind11_rdp
 scipy
