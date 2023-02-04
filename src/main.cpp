@@ -678,14 +678,73 @@ bool condense_geojson(const std::string &input_path,
     return true;
 }
 
-bool dissect_feature_collection(
-    const std::string &input_path,
-    const std::optional<std::string> &output_geometry,
-    const std::optional<std::string> &output_properties,
-    const std::optional<std::string> &output_observations,
-    const std::optional<std::string> &output_others)
+bool dissect_geojson(const std::string &input_path,
+                     const std::optional<std::string> &output_geometry,
+                     const std::optional<std::string> &output_properties,
+                     const std::optional<std::string> &output_observations,
+                     const std::optional<std::string> &output_others,
+                     bool indent = false)
 {
-    return false;
+    if (!output_geometry && !output_properties && !output_observations &&
+        !output_others) {
+        spdlog::error(
+            "should specify either --output_geometry, "
+            "--output_properties, --output_observations or --output_others");
+        return false;
+    }
+    auto json = load_json(input_path);
+    if (!json.IsObject()           //
+        || !json.HasMember("type") //
+        || "FeatureCollection" != std::string{json["type"].GetString(),
+                                              json["type"].GetStringLength()}) {
+        spdlog::error("not valid geojson FeatureCollection data: {}",
+                      input_path);
+        return false;
+    }
+    RapidjsonAllocator allocator;
+    auto &features = json["features"];
+    if (output_geometry) {
+        RapidjsonValue geometry(rapidjson::kArrayType);
+        for (auto &f : features.GetArray()) {
+            geometry.PushBack(f["geometry"], allocator);
+        }
+        spdlog::info("writing to {}", *output_geometry);
+        if (!dump_json(*output_geometry, geometry, indent)) {
+            spdlog::error("failed to dump to {}", *output_geometry);
+            return false;
+        }
+    }
+    if (output_properties) {
+        RapidjsonValue properties(rapidjson::kArrayType);
+        properties.Reserve(features.Size(), allocator);
+        for (auto &f : features.GetArray()) {
+            properties.PushBack(f["properties"], allocator);
+        }
+        spdlog::info("writing to {}", *output_properties);
+        if (!dump_json(*output_properties, properties, indent)) {
+            spdlog::error("failed to dump to {}", *output_properties);
+            return false;
+        }
+    }
+    if (output_observations && json.HasMember("observations")) {
+        spdlog::info("writing to {}", *output_observations);
+        if (!dump_json(*output_observations, json["observations"], indent)) {
+            spdlog::error("failed to dump to {}", *output_observations);
+            return false;
+        }
+    }
+    if (!output_others) {
+        return true;
+    }
+    json.EraseMember("type");
+    json.EraseMember("features");
+    json.EraseMember("observations");
+    spdlog::info("writing to {}", *output_others);
+    if (!dump_json(*output_others, json, indent)) {
+        spdlog::error("failed to dump to {}", *output_others);
+        return false;
+    }
+    return true;
 }
 
 PYBIND11_MODULE(pybind11_geocondense, m)
@@ -714,6 +773,17 @@ PYBIND11_MODULE(pybind11_geocondense, m)
           "output_strip_path"_a = std::nullopt,  //
           "output_grids_dir"_a = std::nullopt,   //
           "options"_a = CondenseOptions())
+        //
+        ;
+
+    m.def("dissect_geojson", &dissect_geojson,    //
+          py::kw_only(),                          //
+          "input_path"_a,                         //
+          "output_geometry"_a = std::nullopt,     //
+          "output_properties"_a = std::nullopt,   //
+          "output_observations"_a = std::nullopt, //
+          "output_others"_a = std::nullopt,       //
+          "indent"_a = false)
         //
         ;
 
