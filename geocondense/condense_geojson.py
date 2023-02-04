@@ -1,3 +1,5 @@
+import os
+from pprint import pprint
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from geocondense import CondenseOptions
@@ -19,6 +21,7 @@ def condense_geojson(
     sparsify_upper_limit: int = 48,
     debug: bool = False,
 ):
+    # setup options
     options = CondenseOptions()
     options.douglas_epsilon = douglas_epsilon
     options.grid_h3_resolution = grid_h3_resolution
@@ -28,13 +31,24 @@ def condense_geojson(
     options.sparsify_h3_resolution = sparsify_h3_resolution
     options.sparsify_upper_limit = sparsify_upper_limit
     options.debug = debug
-    return condense_geojson_impl(
+
+    # mkdir -p
+    for path in [output_index_path, output_strip_path]:
+        path = os.path.abspath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.abspath(output_grids_dir), exist_ok=True)
+
+    # call c++ condense_geojson
+    succ = condense_geojson_impl(
         input_path=input_path,
         output_index_path=output_index_path,
         output_strip_path=output_strip_path,
         output_grids_dir=output_grids_dir,
         options=options,
     )
+    if not succ:
+        pprint(locals())
+        raise Exception(f"failed to condense geojson: {input_path}")
 
 
 if __name__ == "__main__":

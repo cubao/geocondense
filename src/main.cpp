@@ -292,11 +292,52 @@ index_geojson(const mapbox::geojson::feature_collection &_features)
     }
     for (auto &pair : _features.custom_properties) {
         auto &key = pair.first;
+        if (key.empty() || key.back() != 's') {
+            continue;
+        }
         auto &items = pair.second;
         if (!items.is<mapbox::geojson::value::array_type>()) {
             continue;
         }
         auto &arr = items.get<mapbox::geojson::value::array_type>();
+        RapidjsonValue ids(rapidjson::kArrayType);
+        ids.Reserve(arr.size(), allocator);
+        if (key == "observations") {
+            for (auto &e : arr) {
+                auto &o = e.get<mapbox::geojson::value::object_type>();
+                RapidjsonValue _ids(rapidjson::kArrayType);
+                for (auto &k :
+                     std::vector<std::string>{"frame_id", "landmark_id"}) {
+                    auto itr = o.find(k);
+                    if (itr == o.end() || !itr->second.is<std::string>()) {
+                        continue;
+                    }
+                    auto &v = itr->second.get<std::string>();
+                    _ids.PushBack(
+                        RapidjsonValue(v.c_str(), v.size(), allocator),
+                        allocator);
+                }
+                ids.PushBack(_ids, allocator);
+            }
+        } else {
+            for (auto &e : arr) {
+                if (!e.is<mapbox::geojson::value::object_type>()) {
+                    ids.PushBack(RapidjsonValue(), allocator);
+                    continue;
+                }
+                auto &o = e.get<mapbox::geojson::value::object_type>();
+                auto itr = o.find("id");
+                if (itr == o.end() || !itr->second.is<std::string>()) {
+                    ids.PushBack(RapidjsonValue(), allocator);
+                    continue;
+                }
+                auto &id = itr->second.get<std::string>();
+                ids.PushBack(RapidjsonValue(id.c_str(), id.size(), allocator),
+                             allocator);
+            }
+        }
+        index.AddMember(RapidjsonValue(key.c_str(), key.size(), allocator), ids,
+                        allocator);
     }
 
     return index;
@@ -381,7 +422,7 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
     for (int i = 0; i < _features.size(); ++i) {
         auto &f = _features[i];
         auto itr = f.properties.find("type");
-        if (itr == f.properties.end() || itr->second.is<std::string>()) {
+        if (itr == f.properties.end() || !itr->second.is<std::string>()) {
             selected.insert(i); // keep all features without type
             continue;
         }
