@@ -262,7 +262,11 @@ index_geojson(const mapbox::geojson::feature_collection &_features)
         }
     }
     RapidjsonValue index(rapidjson::kObjectType);
-    // index.AddMember("features.id", mapbox::geojson::convert(ids), allocator);
+    index.AddMember(
+        "features.properties.ids",
+        mapbox::geojson::value::visit(mapbox::geojson::value(std::move(ids)),
+                                      mapbox::geojson::to_value{allocator}),
+        allocator);
     index.AddMember(
         "features.geometry.positions",
         row_vectors_to_json(
@@ -535,7 +539,15 @@ bool condense_geojson(const std::string &input_path,
         return false;
     }
     if (output_index_path) {
-        auto stripped = index_geojson(features);
+        auto index = index_geojson(features);
+        if (options.sort_keys) {
+            sort_keys_inplace(index);
+        }
+        spdlog::info("writing to {}", *output_index_path);
+        if (!dump_json(*output_index_path, index, options.indent)) {
+            spdlog::error("failed to dump to {}", *output_index_path);
+            return false;
+        }
     }
     if (output_strip_path) {
         auto stripped = strip_geojson(features, options.douglas_epsilon);

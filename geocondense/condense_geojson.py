@@ -7,6 +7,7 @@ from geocondense import condense_geojson as condense_geojson_impl
 def condense_geojson(
     *,
     input_path: str,
+    output_index_path: str = None,
     output_strip_path: str = None,
     output_grids_dir: str = None,
     douglas_epsilon: float = 0.4,
@@ -23,6 +24,7 @@ def condense_geojson(
     options.grid_features_keep_properties = grid_features_keep_properties
     return condense_geojson_impl(
         input_path=input_path,
+        output_index_path=output_index_path,
         output_strip_path=output_strip_path,
         output_grids_dir=output_grids_dir,
         options=options,
