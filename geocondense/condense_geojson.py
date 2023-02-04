@@ -11,14 +11,14 @@ def condense_geojson(
     output_strip_path: str = None,
     output_grids_dir: str = None,
     douglas_epsilon: float = 0.4,
-    h3_resolution: int = 8,
+    grid_h3_resolution: int = 8,
     indent: bool = False,
     sort_keys: bool = False,
     grid_features_keep_properties: bool = False,
 ):
     options = CondenseOptions()
     options.douglas_epsilon = douglas_epsilon
-    options.h3_resolution = h3_resolution
+    options.grid_h3_resolution = grid_h3_resolution
     options.indent = indent
     options.sort_keys = sort_keys
     options.grid_features_keep_properties = grid_features_keep_properties

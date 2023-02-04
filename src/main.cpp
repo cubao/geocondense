@@ -13,6 +13,8 @@
 #include <pybind11/stl_bind.h>
 
 #include <optional>
+#include <algorithm>
+#include <random>
 
 #include <mapbox/geojson_impl.hpp>
 #include <mapbox/geojson_value_impl.hpp>
@@ -160,10 +162,14 @@ bool setup_extrinsic_to_heading_pitch_roll(
 struct CondenseOptions
 {
     double douglas_epsilon = 0.4; // meters
-    int h3_resolution = 8; // https://h3geo.org/docs/core-library/restable/
+    int grid_h3_resolution = 8; // https://h3geo.org/docs/core-library/restable/
     bool indent = false;
     bool sort_keys = false;
     bool grid_features_keep_properties = false;
+
+    // https://wolf-h3-viewer.glitch.me/
+    int sparsify_h3_resolution = 11;
+    int sparsify_upper_limit = 42;
 };
 
 inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
@@ -295,80 +301,6 @@ index_geojson(const mapbox::geojson::feature_collection &_features)
     return index;
 }
 
-RapidjsonValue
-strip_geojson(const mapbox::geojson::feature_collection &_features,
-              double douglas_epsilon)
-{
-    RapidjsonAllocator allocator;
-    RapidjsonValue features(rapidjson::kArrayType);
-    features.Reserve(_features.size(), allocator);
-    int index = -1;
-    for (auto &f : _features) {
-        RapidjsonValue feature(rapidjson::kObjectType);
-        feature.AddMember("type", "Feature", allocator);
-        RapidjsonValue properties(rapidjson::kObjectType);
-        f.geometry.match(
-            [&](const mapbox::geojson::line_string &ls) {
-                auto llas = douglas_simplify(
-                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3),
-                    douglas_epsilon, true);
-                mapbox::geojson::line_string geom;
-                geom.resize(llas.rows());
-                Eigen::Map<RowVectors>(&geom[0].x, geom.size(), 3) = llas;
-                feature.AddMember(
-                    "geometry",
-                    mapbox::geojson::convert(
-                        mapbox::geojson::geometry{std::move(geom)}, allocator),
-                    allocator);
-            },
-            [&](const mapbox::geojson::multi_point &mp) {
-                Eigen::Map<const RowVectors> llas(&mp[0].x, mp.size(), 3);
-                const auto enus = lla2enu(llas);
-                Eigen::Vector3d center = llas.colwise().mean();
-                auto geom = mapbox::geojson::convert(
-                    mapbox::geojson::geometry{mapbox::geojson::point{
-                        center[0], center[1], center[2]}},
-                    allocator);
-                feature.AddMember("geometry", geom, allocator);
-                Eigen::Array3d span = Eigen::round((enus.colwise().maxCoeff() -
-                                                    enus.colwise().minCoeff())
-                                                       .array() *
-                                                   100.0) /
-                                      100.0;
-                if (!span.isZero()) {
-                    RapidjsonValue span_xyz(rapidjson::kArrayType);
-                    span_xyz.Reserve(3, allocator);
-                    span_xyz.PushBack(RapidjsonValue(span[0]), allocator);
-                    span_xyz.PushBack(RapidjsonValue(span[1]), allocator);
-                    span_xyz.PushBack(RapidjsonValue(span[2]), allocator);
-                    properties.AddMember("size", span_xyz, allocator);
-                }
-            },
-            [&](const auto &g) {
-                auto geom = mapbox::geojson::convert(f.geometry, allocator);
-                feature.AddMember("geometry", geom, allocator);
-            });
-        auto type_itr = f.properties.find("type");
-        if (type_itr != f.properties.end() &&
-            type_itr->second.is<std::string>()) {
-            auto &type = type_itr->second.get<std::string>();
-            properties.AddMember(
-                "type",                                               //
-                RapidjsonValue(type.c_str(), type.size(), allocator), //
-                allocator);
-        }
-        properties.AddMember("index", RapidjsonValue(++index), allocator);
-        setup_extrinsic_to_heading_pitch_roll(f.properties, properties,
-                                              allocator);
-        feature.AddMember("properties", properties, allocator);
-        features.PushBack(feature, allocator);
-    }
-    RapidjsonValue geojson(rapidjson::kObjectType);
-    geojson.AddMember("type", "FeatureCollection", allocator);
-    geojson.AddMember("features", features, allocator);
-    return geojson;
-}
-
 inline uint64_t h3index(int resolution, double lon, double lat)
 {
     LatLng coord;
@@ -437,6 +369,101 @@ inline std::set<uint64_t> h3index(int resolution,
     return ret;
 }
 
+RapidjsonValue
+strip_geojson(const mapbox::geojson::feature_collection &_features,
+              const CondenseOptions &options)
+{
+    std::unordered_map<uint64_t,
+                       std::unordered_map<std::string, std::vector<int>>>
+        h3_id_idx;
+    for (int i = 0; i < _features.size(); ++i) {
+        auto &f = _features[i];
+        std::string type;
+        auto itr = f.properties.find("type");
+        if (itr != f.properties.end()) {
+        }
+        auto h3idxes = h3index(options.sparsify_h3_resolution, f.geometry);
+        for (auto h3idx : h3idxes) {
+        }
+    }
+    auto rng = std::default_random_engine{};
+    for (auto &pair : h3_id_idx) {
+        for (auto &id_idx : pair.second) {
+            auto &idxes = id_idx.second;
+            std::shuffle(idxes.begin(), idxes.end(), rng);
+        }
+    }
+
+    RapidjsonAllocator allocator;
+    RapidjsonValue features(rapidjson::kArrayType);
+    features.Reserve(_features.size(), allocator);
+    int index = -1;
+    for (auto &f : _features) {
+        RapidjsonValue feature(rapidjson::kObjectType);
+        feature.AddMember("type", "Feature", allocator);
+        RapidjsonValue properties(rapidjson::kObjectType);
+        f.geometry.match(
+            [&](const mapbox::geojson::line_string &ls) {
+                auto llas = douglas_simplify(
+                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3),
+                    options.douglas_epsilon, true);
+                mapbox::geojson::line_string geom;
+                geom.resize(llas.rows());
+                Eigen::Map<RowVectors>(&geom[0].x, geom.size(), 3) = llas;
+                feature.AddMember(
+                    "geometry",
+                    mapbox::geojson::convert(
+                        mapbox::geojson::geometry{std::move(geom)}, allocator),
+                    allocator);
+            },
+            [&](const mapbox::geojson::multi_point &mp) {
+                Eigen::Map<const RowVectors> llas(&mp[0].x, mp.size(), 3);
+                const auto enus = lla2enu(llas);
+                Eigen::Vector3d center = llas.colwise().mean();
+                auto geom = mapbox::geojson::convert(
+                    mapbox::geojson::geometry{mapbox::geojson::point{
+                        center[0], center[1], center[2]}},
+                    allocator);
+                feature.AddMember("geometry", geom, allocator);
+                Eigen::Array3d span = Eigen::round((enus.colwise().maxCoeff() -
+                                                    enus.colwise().minCoeff())
+                                                       .array() *
+                                                   100.0) /
+                                      100.0;
+                if (!span.isZero()) {
+                    RapidjsonValue span_xyz(rapidjson::kArrayType);
+                    span_xyz.Reserve(3, allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[0]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[1]), allocator);
+                    span_xyz.PushBack(RapidjsonValue(span[2]), allocator);
+                    properties.AddMember("size", span_xyz, allocator);
+                }
+            },
+            [&](const auto &g) {
+                auto geom = mapbox::geojson::convert(f.geometry, allocator);
+                feature.AddMember("geometry", geom, allocator);
+            });
+        auto type_itr = f.properties.find("type");
+        if (type_itr != f.properties.end() &&
+            type_itr->second.is<std::string>()) {
+            auto &type = type_itr->second.get<std::string>();
+            properties.AddMember(
+                "type",                                               //
+                RapidjsonValue(type.c_str(), type.size(), allocator), //
+                allocator);
+        }
+        properties.AddMember("index", RapidjsonValue(++index), allocator);
+        setup_extrinsic_to_heading_pitch_roll(f.properties, properties,
+                                              allocator);
+        feature.AddMember("properties", properties, allocator);
+        features.PushBack(feature, allocator);
+    }
+    RapidjsonValue geojson(rapidjson::kObjectType);
+    geojson.AddMember("type", "FeatureCollection", allocator);
+    geojson.AddMember("features", features, allocator);
+    return geojson;
+}
+
 bool gridify_geojson(const mapbox::geojson::feature_collection &features,
                      const std::string &output_grids_dir,
                      const CondenseOptions &options)
@@ -445,7 +472,7 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
     std::unordered_map<uint64_t, std::vector<int>> h3index2index;
     for (int i = 0; i < features.size(); ++i) {
         auto &f = features[i];
-        auto h3idxes = h3index(options.h3_resolution, f.geometry);
+        auto h3idxes = h3index(options.grid_h3_resolution, f.geometry);
         for (auto h3idx : h3idxes) {
             h3index2index[h3idx].push_back(i);
         }
@@ -498,7 +525,7 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
         }
         std::string path =
             fmt::format("{}/h3_cell_{}_{:016x}.json", output_grids_dir,
-                        options.h3_resolution, h3idx);
+                        options.grid_h3_resolution, h3idx);
         spdlog::info("writing {} features to {}", fc.size(), path);
         if (!dump_json(path, json, options.indent)) {
             spdlog::error("failed to write {} features (h3idx: {}) to {}",
@@ -550,7 +577,7 @@ bool condense_geojson(const std::string &input_path,
         }
     }
     if (output_strip_path) {
-        auto stripped = strip_geojson(features, options.douglas_epsilon);
+        auto stripped = strip_geojson(features, options);
         if (options.sort_keys) {
             sort_keys_inplace(stripped);
         }
@@ -571,11 +598,16 @@ PYBIND11_MODULE(pybind11_geocondense, m)
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
         .def(py::init<>())
         .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon)
-        .def_readwrite("h3_resolution", &CondenseOptions::h3_resolution)
+        .def_readwrite("grid_h3_resolution",
+                       &CondenseOptions::grid_h3_resolution)
         .def_readwrite("indent", &CondenseOptions::indent)
         .def_readwrite("sort_keys", &CondenseOptions::sort_keys)
         .def_readwrite("grid_features_keep_properties",
                        &CondenseOptions::grid_features_keep_properties)
+        .def_readwrite("sparsify_h3_resolution",
+                       &CondenseOptions::sparsify_h3_resolution)
+        .def_readwrite("sparsify_upper_limit",
+                       &CondenseOptions::sparsify_upper_limit)
         //
         ;
 
