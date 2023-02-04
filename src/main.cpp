@@ -243,15 +243,51 @@ index_geojson(const mapbox::geojson::feature_collection &_features)
 {
     RapidjsonAllocator allocator;
 
-    RapidjsonValue index(rapidjson::kObjectType);
+    mapbox::geojson::value::array_type ids;
+    ids.reserve(_features.size());
     std::vector<Eigen::Vector3d> positions;
+    positions.reserve(_features.size());
     std::map<int, RowVectors> polylines;
     for (int i = 0; i < _features.size(); ++i) {
         auto &f = _features[i];
         index_geometry(i, f.geometry, positions, polylines);
+        auto &props = f.properties;
+        auto id_itr = props.find("id");
+        if (id_itr != props.end() && id_itr->second.is<std::string>()) {
+            ids.push_back(id_itr->second);
+        } else if (!f.id.is<std::string>()) {
+            ids.push_back(f.id.get<std::string>());
+        } else {
+            ids.push_back(mapbox::feature::null_value);
+        }
+    }
+    RapidjsonValue index(rapidjson::kObjectType);
+    // index.AddMember("features.id", mapbox::geojson::convert(ids), allocator);
+    index.AddMember(
+        "features.geometry.positions",
+        row_vectors_to_json(
+            Eigen::Map<const RowVectors>(&positions[0][0], positions.size(), 3),
+            allocator),
+        allocator);
+    {
+        RapidjsonValue j(rapidjson::kObjectType);
+        j.MemberReserve(polylines.size(), allocator);
+        for (auto &pair : polylines) {
+            auto idx = std::to_string(pair.first);
+            j.AddMember(RapidjsonValue(idx.c_str(), idx.size(), allocator),
+                        row_vectors_to_json(pair.second, allocator), allocator);
+        }
+        index.AddMember("features.geometry.polylines", j, allocator);
     }
     for (auto &pair : _features.custom_properties) {
+        auto &key = pair.first;
+        auto &items = pair.second;
+        if (!items.is<mapbox::geojson::value::array_type>()) {
+            continue;
+        }
+        auto &arr = items.get<mapbox::geojson::value::array_type>();
     }
+
     return index;
 }
 
@@ -534,6 +570,7 @@ PYBIND11_MODULE(pybind11_geocondense, m)
     m.def("condense_geojson", &condense_geojson, //
           py::kw_only(),                         //
           "input_path"_a,                        //
+          "output_index_path"_a = std::nullopt,  //
           "output_strip_path"_a = std::nullopt,  //
           "output_grids_dir"_a = std::nullopt,   //
           "options"_a = CondenseOptions())
