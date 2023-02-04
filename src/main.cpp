@@ -678,6 +678,16 @@ bool condense_geojson(const std::string &input_path,
     return true;
 }
 
+bool dissect_feature_collection(
+    const std::string &input_path,
+    const std::optional<std::string> &output_geometry,
+    const std::optional<std::string> &output_properties,
+    const std::optional<std::string> &output_observations,
+    const std::optional<std::string> &output_others)
+{
+    return false;
+}
+
 PYBIND11_MODULE(pybind11_geocondense, m)
 {
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
