@@ -15,6 +15,9 @@ def condense_geojson(
     indent: bool = False,
     sort_keys: bool = False,
     grid_features_keep_properties: bool = False,
+    sparsify_h3_resolution: int = 11,
+    sparsify_upper_limit: int = 48,
+    debug: bool = False,
 ):
     options = CondenseOptions()
     options.douglas_epsilon = douglas_epsilon
@@ -22,6 +25,9 @@ def condense_geojson(
     options.indent = indent
     options.sort_keys = sort_keys
     options.grid_features_keep_properties = grid_features_keep_properties
+    options.sparsify_h3_resolution = sparsify_h3_resolution
+    options.sparsify_upper_limit = sparsify_upper_limit
+    options.debug = debug
     return condense_geojson_impl(
         input_path=input_path,
         output_index_path=output_index_path,

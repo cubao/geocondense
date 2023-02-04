@@ -170,6 +170,7 @@ struct CondenseOptions
     // https://wolf-h3-viewer.glitch.me/
     int sparsify_h3_resolution = 11;
     int sparsify_upper_limit = 42;
+    bool debug = false;
 };
 
 inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
@@ -373,32 +374,45 @@ RapidjsonValue
 strip_geojson(const mapbox::geojson::feature_collection &_features,
               const CondenseOptions &options)
 {
-    std::unordered_map<uint64_t,
-                       std::unordered_map<std::string, std::vector<int>>>
-        h3_id_idx;
+    auto h3_type_idx =
+        std::unordered_map<uint64_t,
+                           std::unordered_map<std::string, std::vector<int>>>{};
+    auto selected = std::set<int>{};
     for (int i = 0; i < _features.size(); ++i) {
         auto &f = _features[i];
-        std::string type;
         auto itr = f.properties.find("type");
-        if (itr != f.properties.end()) {
+        if (itr == f.properties.end() || itr->second.is<std::string>()) {
+            selected.insert(i); // keep all features without type
+            continue;
         }
+        auto &type = itr->second.get<std::string>();
         auto h3idxes = h3index(options.sparsify_h3_resolution, f.geometry);
         for (auto h3idx : h3idxes) {
+            h3_type_idx[h3idx][type].push_back(i);
         }
     }
     auto rng = std::default_random_engine{};
-    for (auto &pair : h3_id_idx) {
+    for (auto &pair : h3_type_idx) {
         for (auto &id_idx : pair.second) {
             auto &idxes = id_idx.second;
-            std::shuffle(idxes.begin(), idxes.end(), rng);
+            if (idxes.size() <= options.sparsify_upper_limit) {
+                selected.insert(idxes.begin(), idxes.end());
+            } else {
+                std::shuffle(idxes.begin(), idxes.end(), rng);
+                selected.insert(idxes.begin(),
+                                idxes.begin() + options.sparsify_upper_limit);
+            }
         }
     }
 
     RapidjsonAllocator allocator;
     RapidjsonValue features(rapidjson::kArrayType);
-    features.Reserve(_features.size(), allocator);
-    int index = -1;
-    for (auto &f : _features) {
+    features.Reserve(selected.size(), allocator);
+    for (int index = 0, N = _features.size(); index < N; ++index) {
+        if (selected.find(index) == selected.end()) {
+            continue;
+        }
+        auto &f = _features[index];
         RapidjsonValue feature(rapidjson::kObjectType);
         feature.AddMember("type", "Feature", allocator);
         RapidjsonValue properties(rapidjson::kObjectType);
@@ -452,7 +466,7 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
                 RapidjsonValue(type.c_str(), type.size(), allocator), //
                 allocator);
         }
-        properties.AddMember("index", RapidjsonValue(++index), allocator);
+        properties.AddMember("index", RapidjsonValue(index), allocator);
         setup_extrinsic_to_heading_pitch_roll(f.properties, properties,
                                               allocator);
         feature.AddMember("properties", properties, allocator);
@@ -461,6 +475,24 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
     RapidjsonValue geojson(rapidjson::kObjectType);
     geojson.AddMember("type", "FeatureCollection", allocator);
     geojson.AddMember("features", features, allocator);
+    if (options.debug) {
+        std::map<std::string, int> type2count;
+        for (auto &pair : h3_type_idx) {
+            for (auto &t2i : pair.second) {
+                auto &t = t2i.first;
+                type2count[t] = std::max(type2count[t], (int)t2i.second.size());
+            }
+        }
+        auto stats = mapbox::geojson::value::object_type{};
+        for (auto &pair : type2count) {
+            stats[pair.first] = pair.second;
+        }
+        geojson.AddMember("h3_cell_statistics",
+                          mapbox::geojson::value::visit(
+                              mapbox::geojson::value{std::move(stats)},
+                              mapbox::geojson::to_value{allocator}),
+                          allocator);
+    }
     return geojson;
 }
 
@@ -519,6 +551,18 @@ bool gridify_geojson(const mapbox::geojson::feature_collection &features,
                                                   props, allocator);
             props.GetObject().AddMember("index", RapidjsonValue(idx),
                                         allocator);
+            if (options.debug) {
+                auto &h3idxes = index2h3index.at(idx);
+                RapidjsonValue arr(rapidjson::kArrayType);
+                arr.Reserve(h3idxes.size(), allocator);
+                for (auto h : h3idxes) {
+                    auto hex = fmt::format("{:016x}", h);
+                    arr.PushBack(
+                        RapidjsonValue(hex.c_str(), hex.size(), allocator),
+                        allocator);
+                }
+                props.GetObject().AddMember("h3index", arr, allocator);
+            }
         }
         if (options.sort_keys) {
             sort_keys_inplace(json);
@@ -608,6 +652,7 @@ PYBIND11_MODULE(pybind11_geocondense, m)
                        &CondenseOptions::sparsify_h3_resolution)
         .def_readwrite("sparsify_upper_limit",
                        &CondenseOptions::sparsify_upper_limit)
+        .def_readwrite("debug", &CondenseOptions::debug)
         //
         ;
 
