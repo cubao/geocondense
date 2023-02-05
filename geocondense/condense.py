@@ -1,12 +1,11 @@
+import argparse
 import json
 import os
-from itertools import chain
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
-import numpy as np
 import open3d as o3d
 from loguru import logger
-from pprint import pprint
 
 from geocondense.utils import md5sum
 
@@ -53,24 +52,20 @@ def condense_pointcloud(pcd: o3d.geometry.PointCloud, *, output_dir: str) -> str
 def condense(
     *,
     workdir: str,
-    semantic_files: Union[str, List[str]] = None,
-    pointcloud_files: Union[str, List[str]] = None,
+    semantic_files: List[str] = None,
+    pointcloud_files: List[str] = None,
     center: Optional[Tuple[float, float, float]] = None,
     # handlers
     handle_semantic=default_handle_semantic,
     handle_pointcloud=default_handle_pointcloud,
-) -> List[str]:
+) -> Dict[str, str]:
     assert not (
         semantic_files is None and pointcloud_files is None
-    ), f"should specify either --semantic_files or --pointcloud_files"
+    ), "should specify either --semantic_files or --pointcloud_files"
     semantic_files = semantic_files or []
     pointcloud_files = pointcloud_files or []
-    if isinstance(semantic_files, str):
-        semantic_files = semantic_files.split(',')
-    if isinstance(pointcloud_files, str):
-        pointcloud_files = pointcloud_files.split(',')
-    logger.info(f'semantic files: {semantic_files} (#{len(semantic_files)})')
-    logger.info(f'pointcloud files: {pointcloud_files} (#{len(pointcloud_files)})')
+    logger.info(f"semantic files: {semantic_files} (#{len(semantic_files)})")
+    logger.info(f"pointcloud files: {pointcloud_files} (#{len(pointcloud_files)})")
 
     for p in [*semantic_files, *pointcloud_files]:
         assert os.path.isfile(p), f"{p} does not exist"
@@ -108,11 +103,67 @@ def condense(
         index = condense_pointcloud(pcd, output_dir=odir)
         index_map[path] = index
         Path(sentinel).touch()
-    return index_list
+    return index_map
+
+
+def main(
+    handle_semantic=default_handle_semantic,
+    handle_pointcloud=default_handle_pointcloud,
+):
+    prog = "python3 -m geocondense.condense"
+    description = "condense semantic & pointcloud"
+    parser = argparse.ArgumentParser(prog=prog, description=description)
+    parser.add_argument(
+        "workdir",
+        type=str,
+        help="workdir",
+    )
+    parser.add_argument(
+        "--center",
+        type=str,
+        help='specify with --center="lon,lat,alt" or --center="path/to/center.txt"',
+    )
+    parser.add_argument(
+        "--semantic_files",
+        nargs="*",
+        type=str,
+        help="semantic files (geojson or osm)",
+    )
+    parser.add_argument(
+        "--pointcloud_files",
+        nargs="*",
+        type=str,
+        help="pointcloud files (pcd or other pointcloud file (you should write your own handle_pointcloud))",
+    )
+    parser.add_argument(
+        "--export",
+        type=str,
+        help="export to json",
+    )
+    args = parser.parse_args()
+    workdir: str = args.workdir
+    semantic_files: List[str] = args.semantic_files
+    pointcloud_files: List[str] = args.pointcloud_files
+    center: Optional[str] = args.center
+    export: Optional[str] = args.export
+    args = None
+
+    index = condense(
+        workdir=workdir,
+        semantic_files=semantic_files,
+        pointcloud_files=pointcloud_files,
+        center=center,
+        handle_semantic=handle_semantic,
+        handle_pointcloud=handle_pointcloud,
+    )
+    if export:
+        logger.info(f"export to {export}")
+        os.makedirs(os.path.dirname(os.path.abspath(export)), exist_ok=True)
+        with open(export, "w") as f:
+            json.dump(index, f, indent=4)
+    else:
+        logger.info(f"export: {json.dumps(index, indent=4)}")
 
 
 if __name__ == "__main__":
-    import fire
-
-    fire.core.Display = lambda lines, out: print(*lines, file=out)
-    fire.Fire(condense)
+    main()

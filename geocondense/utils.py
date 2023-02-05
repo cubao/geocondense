@@ -1,10 +1,11 @@
-from functools import lru_cache
+import os
+import subprocess
 from sys import platform
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 
 def popen(cmd: Union[str, List[str]]) -> Tuple[int, str, str]:
-    if isinstance(cmd):
+    if isinstance(cmd, str):
         cmd = cmd.split(" ")
     p = subprocess.Popen(
         cmd,
@@ -19,11 +20,11 @@ def popen(cmd: Union[str, List[str]]) -> Tuple[int, str, str]:
 def md5sum(path: str) -> str:
     assert os.path.isfile(path), f"{path} does not exist"
     if platform == "linux" or platform == "linux2":
-        retcode, stdout, stderr = popen(["md5", path])
+        retcode, stdout, stderr = popen(["md5sum", path])
         assert retcode == 0
         md5 = stdout.split()[0]
     elif platform.startswith("darwin"):
-        retcode, stdout, stderr = popen(["md5sum", path])
+        retcode, stdout, stderr = popen(["md5", path])
         assert retcode == 0
         md5 = stdout.strip().split()[-1]
     else:

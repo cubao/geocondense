@@ -1,7 +1,7 @@
 import json
 import os
 from itertools import chain
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import numpy as np
 import open3d as o3d
@@ -22,7 +22,7 @@ def condense_pointcloud_impl(
 ):
     assert (
         output_fence_path or output_grids_dir
-    ), f"should specify either --output_fence_path or --output_grids_dir"
+    ), "should specify either --output_fence_path or --output_grids_dir"
     if output_fence_path:
         assert output_fence_path.endswith(
             ".json"
@@ -32,13 +32,13 @@ def condense_pointcloud_impl(
     wgs84_scale = int(wgs84_scale)
 
     ecefs = np.asarray(pcd.points)
-    assert len(ecefs), f"not any points in pointcloud"
+    assert len(ecefs), "not any points in pointcloud"
     R = np.linalg.norm(ecefs[0])
     assert (
         R > 6300 * 1000
     ), f"data (should be in ECEF) not on earth? (forgot to specify --center?), R is: {R}"
     anchor = tf.ecef2lla(*ecefs[0])
-    anchor[:2] = [round(l * wgs84_scale) / wgs84_scale for l in anchor[:2]]
+    anchor[:2] = [round(x * wgs84_scale) / wgs84_scale for x in anchor[:2]]
     anchor[2] = 0.0
     anchor_text = "_".join([str(x) for x in anchor])
 
@@ -55,25 +55,25 @@ def condense_pointcloud_impl(
     )
     lon0, lat0 = lla_bounds[0][:2]
     lon1, lat1 = lla_bounds[1][:2]
-    lon0, lon1 = (round(l * wgs84_scale) / wgs84_scale for l in [lon0, lon1])
-    lat0, lat1 = (round(l * wgs84_scale) / wgs84_scale for l in [lat0, lat1])
+    lon0, lon1 = (round(x * wgs84_scale) / wgs84_scale for x in [lon0, lon1])
+    lat0, lat1 = (round(x * wgs84_scale) / wgs84_scale for x in [lat0, lat1])
     lons = np.arange(
         lon0 - grid_resolution, lon1 + grid_resolution + 1e-15, grid_resolution
     )
     lats = np.arange(
         lat0 - grid_resolution, lat1 + grid_resolution + 1e-15, grid_resolution
     )
-    lons = [round(l * wgs84_scale) / wgs84_scale for l in lons]
-    lats = [round(l * wgs84_scale) / wgs84_scale for l in lats]
+    lons = [round(x * wgs84_scale) / wgs84_scale for x in lons]
+    lats = [round(x * wgs84_scale) / wgs84_scale for x in lats]
     assert len(lons) > 1
     assert len(lats) > 1
     xs = tf.lla2enu(
-        [[l, lats[0], 0.0] for l in lons],
+        [[x, lats[0], 0.0] for x in lons],
         anchor_lla=anchor,
         cheap_ruler=False,
     )[:, 0]
     ys = tf.lla2enu(
-        [[lons[0], l, 0.0] for l in lats],
+        [[lons[0], x, 0.0] for x in lats],
         anchor_lla=anchor,
         cheap_ruler=False,
     )[:, 1]
@@ -138,8 +138,8 @@ def condense_pointcloud_impl(
         return
     output_grids_dir = os.path.abspath(output_grids_dir)
     os.makedirs(output_grids_dir, exist_ok=True)
-    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):
-        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):
+    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):  # noqa
+        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):  # noqa
             mask = np.logical_and(
                 np.logical_and(x0 <= xyzs[:, 0], xyzs[:, 0] < x1),
                 np.logical_and(y0 <= xyzs[:, 1], xyzs[:, 1] < y1),
@@ -182,7 +182,7 @@ def condense_pointcloud(
 ):
     assert (
         output_fence_path or output_grids_dir
-    ), f"should specify either --output_fence_path or --output_grids_dir"
+    ), "should specify either --output_fence_path or --output_grids_dir"
     pcd = o3d.io.read_point_cloud(input_path)
     if center:
         if isinstance(center, str):
