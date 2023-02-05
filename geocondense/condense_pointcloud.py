@@ -17,7 +17,7 @@ def condense_pointcloud_impl(
     pcd: o3d.geometry.PointCloud,
     output_fence_path: Optional[str] = None,
     output_grids_dir: Optional[str] = None,
-    grid_resolution: float = 0.01,
+    grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
 ):
     assert (
@@ -176,7 +176,7 @@ def condense_pointcloud(
     input_path: str,
     output_fence_path: Optional[str] = None,
     output_grids_dir: Optional[str] = None,
-    grid_resolution: float = 0.01,
+    grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
     center: Optional[Tuple[float, float, float]] = None,
 ):
