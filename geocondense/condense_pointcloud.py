@@ -108,6 +108,7 @@ def condense_pointcloud_impl(
     llas[:, 2] = llas[:, 2].round(1)
     mask = rdp_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
     llas = llas[mask]
+    os.makedirs(os.path.dirname(os.path.abspath(output_fence_path)), exist_ok=True)
     with open(output_fence_path, "w") as f:
         logger.info(f"writing to {output_fence_path}")
         json.dump(

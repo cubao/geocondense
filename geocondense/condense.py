@@ -5,9 +5,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import open3d as o3d
+import polyline_ruler.tf as tf
 from loguru import logger
 
-from geocondense.utils import md5sum
+from geocondense.condense_geojson import condense_geojson
+from geocondense.condense_pointcloud import condense_pointcloud_impl
+from geocondense.dissect_geojson import dissect_geojson
+from geocondense.utils import md5sum, write_json
 
 
 def resolve_center(
@@ -35,17 +39,69 @@ def default_handle_pointcloud(
     uuid: str,
     center: Optional[Tuple[float, float, float]],
 ) -> o3d.geometry.PointCloud:
-    return o3d.io.read_point_cloud(path)
+    pcd = o3d.io.read_point_cloud(path)
+    if center:
+        lon, lat, alt = center
+        pcd.transform(tf.T_ecef_enu(lon=lon, lat=lat, alt=alt))
+    return pcd
 
 
 def condense_semantic(
-    dissect_input_path: str, condense_input_path: str, *, output_dir: str
+    dissect_input_path: str,
+    condense_input_path: str,
+    *,
+    output_dir: str,
 ) -> str:
-    raise Exception("not ready")
+    dissect_geojson(
+        input_path=dissect_input_path,
+        output_geometry=f"{output_dir}/geometry.json",
+        output_properties=f"{output_dir}/properties.json",
+        output_observations=f"{output_dir}/obseravtions.json",
+        output_others=f"{output_dir}/others.json",
+        indent=True,
+    )
+    condense_geojson(
+        input_path=condense_input_path,
+        output_index_path=f"{output_dir}/meta.json",
+        output_strip_path=f"{output_dir}/main.json",
+        output_grids_dir=f"{output_dir}/grids",
+        indent=True,
+    )
+    path = f"{output_dir}/index.json"
+    write_json(
+        path,
+        {
+            "main": "main.json",
+            "grids": "grids",
+            # TODO
+        },
+    )
+    Path(f"{output_dir}.semantic").touch()
+    return path
 
 
-def condense_pointcloud(pcd: o3d.geometry.PointCloud, *, output_dir: str) -> str:
-    raise Exception("not ready")
+def condense_pointcloud(
+    pcd: o3d.geometry.PointCloud,
+    *,
+    output_dir: str,
+) -> str:
+    condense_pointcloud_impl(
+        pcd=pcd,
+        output_fence_path=f"{output_dir}/main.json",
+        output_grids_dir=f"{output_dir}/grids",
+        grid_resolution=0.0001,
+    )
+    path = f"{output_dir}/index.json"
+    write_json(
+        path,
+        {
+            "main": "main.json",
+            "grids": "grids",
+            # TODO
+        },
+    )
+    Path(f"{output_dir}.pointcloud").touch()
+    return path
 
 
 @logger.catch(reraise=True)
@@ -158,9 +214,7 @@ def main(
     )
     if export:
         logger.info(f"export to {export}")
-        os.makedirs(os.path.dirname(os.path.abspath(export)), exist_ok=True)
-        with open(export, "w") as f:
-            json.dump(index, f, indent=4)
+        write_json(export, index, verbose=False)
     else:
         logger.info(f"export: {json.dumps(index, indent=4)}")
 
