@@ -1,6 +1,8 @@
 import argparse
+import glob
 import json
 import os
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
@@ -11,7 +13,7 @@ from loguru import logger
 from geocondense.condense_geojson import condense_geojson
 from geocondense.condense_pointcloud import condense_pointcloud_impl
 from geocondense.dissect_geojson import dissect_geojson
-from geocondense.utils import md5sum, write_json
+from geocondense.utils import md5sum, read_json, write_json
 
 
 def resolve_center(
@@ -26,7 +28,13 @@ def resolve_center(
     return lon, lat, alt
 
 
-def default_handle_semantic(path: str, *, workdir: str, uuid: str) -> Tuple[str, str]:
+def default_handle_semantic(
+    path: str,
+    *,
+    workdir: str,
+    uuid: str,
+    center: Optional[Tuple[float, float, float]],
+) -> Tuple[str, str]:
     dissect_input_path = path
     condense_input_path = path
     return dissect_input_path, condense_input_path
@@ -68,12 +76,25 @@ def condense_semantic(
         indent=True,
     )
     path = f"{output_dir}/index.json"
+    files = sorted(
+        os.path.basename(p) for p in glob.glob(f"{output_dir}/grids/h3_cell_*.json")
+    )
+    grids = defaultdict(dict)  # res -> h3idx -> file
+    for p in files:
+        # e.g. h3_cell_8_08831aa4301fffff.json
+        res, idx = p.rsplit(".", 1)[0].split("_")[2:]
+        grids[res][idx] = f"grids/{p}"
     write_json(
         path,
         {
+            "type": "semantic",
             "main": "main.json",
-            "grids": "grids",
-            # TODO
+            "grids": grids,
+            "meta": "meta.json",
+            "geometry": "geometry.json",
+            "properties": "properties.json",
+            "observations": "observations.json",
+            "others": "others.json",
         },
     )
     Path(f"{output_dir}.semantic").touch()
@@ -92,12 +113,25 @@ def condense_pointcloud(
         grid_resolution=0.0001,
     )
     path = f"{output_dir}/index.json"
+    files = sorted(
+        os.path.basename(p) for p in glob.glob(f"{output_dir}/grids/grid_res*.pcd")
+    )
+    grids = defaultdict(defaultdict(dict).copy)  # res -> bbox -> {}
+    for p in files:
+        # grid_res0.0001_116.311_39.8959_116.3111_39.896_anchor_116.3114_39.8958_0.0_raw.pcd
+        # grid_res0.0001_116.311_39.8958_116.3111_39.8959_anchor_116.3114_39.8958_0.0_voxel0.25.pcd
+        res, lon0, lat0, lon1, lat1, _, ax, ay, az, category = p[8:-4].split("_")
+        grids[res][f"{lon0},{lat0},{lon1},{lat1}"] = {
+            "file": f"grids/{p}",
+            "anchor": [float(ax), float(ay), float(az)],
+            "category": category,
+        }
     write_json(
         path,
         {
+            "type": "pointcloud",
             "main": "main.json",
-            "grids": "grids",
-            # TODO
+            "grids": grids,
         },
     )
     Path(f"{output_dir}.pointcloud").touch()
@@ -131,24 +165,26 @@ def condense(
     for path in semantic_files:
         uuid = md5sum(path)
         odir = f"{workdir}/{uuid}"
-        sentinel = f"{odir}/condensed"
-        if os.path.isfile(sentinel):
-            logger.info(f"skip condensing {path}, sentinel exists: {sentinel}")
+        index = f"{odir}/index.json"
+        if os.path.isfile(index):
+            logger.info(f"skip condensing {path}, index exists: {index}")
+            index_map[path] = {"uuid": uuid, **read_json(index)}
             continue
         dissect_input, condense_input = handle_semantic(
             path,
             workdir=workdir,
             uuid=uuid,
+            center=center,
         )
         index = condense_semantic(dissect_input, condense_input, output_dir=odir)
-        index_map[path] = index
-        Path(sentinel).touch()
+        index_map[path] = {"uuid": uuid, **read_json(index)}
     for path in pointcloud_files:
         uuid = md5sum(path)
         odir = f"{workdir}/{uuid}"
-        sentinel = f"{odir}/condensed"
-        if os.path.isfile(sentinel):
-            logger.info(f"skip condensing {path}, sentinel exists: {sentinel}")
+        index = f"{odir}/index.json"
+        if os.path.isfile(index):
+            logger.info(f"skip condensing {path}, index exists: {index}")
+            index_map[path] = {"uuid": uuid, **read_json(index)}
             continue
         pcd = handle_pointcloud(
             path,
@@ -157,8 +193,7 @@ def condense(
             center=center,
         )
         index = condense_pointcloud(pcd, output_dir=odir)
-        index_map[path] = index
-        Path(sentinel).touch()
+        index_map[path] = {"uuid": uuid, **read_json(index)}
     return index_map
 
 
@@ -217,6 +252,7 @@ def main(
         write_json(export, index, verbose=False)
     else:
         logger.info(f"export: {json.dumps(index, indent=4)}")
+        logger.warning("you can specify --export to export to json")
 
 
 if __name__ == "__main__":
