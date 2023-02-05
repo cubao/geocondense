@@ -64,7 +64,7 @@ def condense_semantic(
         input_path=dissect_input_path,
         output_geometry=f"{output_dir}/geometry.json",
         output_properties=f"{output_dir}/properties.json",
-        output_observations=f"{output_dir}/obseravtions.json",
+        output_observations=f"{output_dir}/observations.json",
         output_others=f"{output_dir}/others.json",
         indent=True,
     )
@@ -116,15 +116,16 @@ def condense_pointcloud(
     files = sorted(
         os.path.basename(p) for p in glob.glob(f"{output_dir}/grids/grid_res*.pcd")
     )
-    grids = defaultdict(defaultdict(dict).copy)  # res -> bbox -> {}
+    grids = defaultdict(
+        defaultdict(defaultdict(dict).copy).copy
+    )  # res -> bbox -> category -> {info}
     for p in files:
         # grid_res0.0001_116.311_39.8959_116.3111_39.896_anchor_116.3114_39.8958_0.0_raw.pcd
         # grid_res0.0001_116.311_39.8958_116.3111_39.8959_anchor_116.3114_39.8958_0.0_voxel0.25.pcd
         res, lon0, lat0, lon1, lat1, _, ax, ay, az, category = p[8:-4].split("_")
-        grids[res][f"{lon0},{lat0},{lon1},{lat1}"] = {
+        grids[res][f"{lon0},{lat0},{lon1},{lat1}"][category] = {
             "file": f"grids/{p}",
             "anchor": [float(ax), float(ay), float(az)],
-            "category": category,
         }
     write_json(
         path,
