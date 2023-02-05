@@ -54,10 +54,12 @@ def condense_pointcloud_impl(
     )
     lon0, lat0 = lla_bounds[0][:2]
     lon1, lat1 = lla_bounds[1][:2]
-    lon0, lon1 = (round(l * wgs84_scale) / wgs84_scale for l in [lon0, lon1])
-    lat0, lat1 = (round(l * wgs84_scale) / wgs84_scale for l in [lat0, lat1])
+    lon0, lon1 = [round(l * wgs84_scale) / wgs84_scale for l in [lon0, lon1]]
+    lat0, lat1 = [round(l * wgs84_scale) / wgs84_scale for l in [lat0, lat1]]
     lons = np.arange(lon0 - wgs84_epsilon, lon1 + wgs84_epsilon + 1e-15, wgs84_epsilon)
     lats = np.arange(lat0 - wgs84_epsilon, lat1 + wgs84_epsilon + 1e-15, wgs84_epsilon)
+    lons = [round(l * wgs84_scale) / wgs84_scale for l in lons]
+    lats = [round(l * wgs84_scale) / wgs84_scale for l in lats]
     assert len(lons) > 1
     assert len(lats) > 1
     xs = tf.lla2enu(
@@ -116,9 +118,9 @@ def condense_pointcloud_impl(
                         "properties": {
                             "type": "pointcloud",
                             "#points": len(enus),
-                            "#voxels": len(xyzs),
-                            "lla_bounds": lla_bounds.tolist(),
-                            "enu_bounds": (pmax - pmin).round(2).tolist(),
+                            "#voxels_1m^3": len(xyzs),
+                            "bbox": lla_bounds.tolist(),
+                            "size": (pmax - pmin).round(2).tolist(),
                         },
                     }
                 ],
