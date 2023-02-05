@@ -128,7 +128,7 @@ install_requires = [
 # logic and declaration, and simpler if you include description/version in a file.
 setup(
     name="geocondense",
-    version="0.0.2",
+    version="0.0.3",
     author="tzx",
     author_email="dvorak4tzx@gmail.com",
     url="https://github.com/cubao/geocondense",

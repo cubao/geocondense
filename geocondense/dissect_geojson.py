@@ -1,6 +1,6 @@
 import os
 from pprint import pprint
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 from geocondense import dissect_geojson as dissect_geojson_impl
 
