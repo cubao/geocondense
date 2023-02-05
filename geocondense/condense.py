@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 import open3d as o3d
 from loguru import logger
+from pprint import pprint
 
 from geocondense.utils import md5sum
 
@@ -48,11 +49,12 @@ def condense_pointcloud(pcd: o3d.geometry.PointCloud, *, output_dir: str) -> str
     raise Exception("not ready")
 
 
+@logger.catch(reraise=True)
 def condense(
     *,
     workdir: str,
-    semantic_files: List[str] = None,
-    pointcloud_files: List[str] = None,
+    semantic_files: Union[str, List[str]] = None,
+    pointcloud_files: Union[str, List[str]] = None,
     center: Optional[Tuple[float, float, float]] = None,
     # handlers
     handle_semantic=default_handle_semantic,
@@ -61,12 +63,21 @@ def condense(
     assert not (
         semantic_files is None and pointcloud_files is None
     ), f"should specify either --semantic_files or --pointcloud_files"
-    for p in [*(semantic_files or []), *(pointcloud_files or [])]:
+    semantic_files = semantic_files or []
+    pointcloud_files = pointcloud_files or []
+    if isinstance(semantic_files, str):
+        semantic_files = semantic_files.split(',')
+    if isinstance(pointcloud_files, str):
+        pointcloud_files = pointcloud_files.split(',')
+    logger.info(f'semantic files: {semantic_files} (#{len(semantic_files)})')
+    logger.info(f'pointcloud files: {pointcloud_files} (#{len(pointcloud_files)})')
+
+    for p in [*semantic_files, *pointcloud_files]:
         assert os.path.isfile(p), f"{p} does not exist"
     center = resolve_center(center)
     os.makedirs(os.path.abspath(workdir), exist_ok=True)
-    index_list = []
-    for path in semantic_files or []:
+    index_map = {}
+    for path in semantic_files:
         uuid = md5sum(path)
         odir = f"{workdir}/{uuid}"
         sentinel = f"{odir}/condensed"
@@ -79,9 +90,9 @@ def condense(
             uuid=uuid,
         )
         index = condense_semantic(dissect_input, condense_input, output_dir=odir)
-        index_list.append(index)
+        index_map[path] = index
         Path(sentinel).touch()
-    for path in pointcloud_files or []:
+    for path in pointcloud_files:
         uuid = md5sum(path)
         odir = f"{workdir}/{uuid}"
         sentinel = f"{odir}/condensed"
@@ -95,7 +106,7 @@ def condense(
             center=center,
         )
         index = condense_pointcloud(pcd, output_dir=odir)
-        index_list.append(index)
+        index_map[path] = index
         Path(sentinel).touch()
     return index_list
 
