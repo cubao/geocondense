@@ -17,7 +17,8 @@ def condense_pointcloud_impl(
     pcd: o3d.geometry.PointCloud,
     output_fence_path: Optional[str] = None,
     output_grids_dir: Optional[str] = None,
-    wgs84_epsilon: float = 0.01,
+    grid_resolution: float = 0.01,
+    compress_pcd: bool = False,
 ):
     assert (
         output_fence_path or output_grids_dir
@@ -26,8 +27,8 @@ def condense_pointcloud_impl(
         assert output_fence_path.endswith(
             ".json"
         ), f"invalid voxel dump: {output_fence_path}, should be a json file"
-    wgs84_scale = 1 / wgs84_epsilon
-    assert wgs84_scale == int(wgs84_scale), f"bad wgs84_epsilon: {wgs84_epsilon}"
+    wgs84_scale = 1 / grid_resolution
+    assert wgs84_scale == int(wgs84_scale), f"bad grid_resolution: {grid_resolution}"
     wgs84_scale = int(wgs84_scale)
 
     ecefs = np.asarray(pcd.points)
@@ -36,7 +37,7 @@ def condense_pointcloud_impl(
     assert (
         R > 6300 * 1000
     ), f"data (should be in ECEF) not on earth? (forgot to specify --center?), R is: {R}"
-    anchor = np.round(tf.ecef2lla(*ecefs[0]), 2)
+    anchor = tf.ecef2lla(*ecefs[0])
     anchor[:2] = [round(l * wgs84_scale) / wgs84_scale for l in anchor[:2]]
     anchor[2] = 0.0
     anchor_text = "_".join([str(x) for x in anchor])
@@ -54,10 +55,14 @@ def condense_pointcloud_impl(
     )
     lon0, lat0 = lla_bounds[0][:2]
     lon1, lat1 = lla_bounds[1][:2]
-    lon0, lon1 = [round(l * wgs84_scale) / wgs84_scale for l in [lon0, lon1]]
-    lat0, lat1 = [round(l * wgs84_scale) / wgs84_scale for l in [lat0, lat1]]
-    lons = np.arange(lon0 - wgs84_epsilon, lon1 + wgs84_epsilon + 1e-15, wgs84_epsilon)
-    lats = np.arange(lat0 - wgs84_epsilon, lat1 + wgs84_epsilon + 1e-15, wgs84_epsilon)
+    lon0, lon1 = (round(l * wgs84_scale) / wgs84_scale for l in [lon0, lon1])
+    lat0, lat1 = (round(l * wgs84_scale) / wgs84_scale for l in [lat0, lat1])
+    lons = np.arange(
+        lon0 - grid_resolution, lon1 + grid_resolution + 1e-15, grid_resolution
+    )
+    lats = np.arange(
+        lat0 - grid_resolution, lat1 + grid_resolution + 1e-15, grid_resolution
+    )
     lons = [round(l * wgs84_scale) / wgs84_scale for l in lons]
     lats = [round(l * wgs84_scale) / wgs84_scale for l in lats]
     assert len(lons) > 1
@@ -148,11 +153,22 @@ def condense_pointcloud_impl(
             grid.colors = o3d.utility.Vector3dVector(rgbs[related])
             bounds = lons[ii], lats[jj], lons[ii + 1], lats[jj + 1]
             bounds = "_".join([str(x) for x in bounds])
-            path = f"{output_grids_dir}/grid_{bounds}_anchor_{anchor_text}.pcd"
+            path = f"{output_grids_dir}/grid_res{grid_resolution}_{bounds}_anchor_{anchor_text}_raw.pcd"
             logger.info(f"writing #{len(grid.points):,} points to {path}")
             assert o3d.io.write_point_cloud(
-                path, grid, compressed=True
+                path,
+                grid,
+                compressed=compress_pcd,
             ), f"failed to dump grid pcd to {path}"
+            for res in [0.25, 0.05]:
+                path = f"{output_grids_dir}/grid_res{grid_resolution}_{bounds}_anchor_{anchor_text}_voxel{res}.pcd"
+                small_grid = grid.voxel_down_sample(res)
+                logger.info(f"writing #{len(small_grid.points):,} points to {path}")
+                assert o3d.io.write_point_cloud(
+                    path,
+                    small_grid,
+                    compressed=compress_pcd,
+                ), f"failed to dump grid pcd to {path}"
 
 
 def condense_pointcloud(
@@ -160,7 +176,8 @@ def condense_pointcloud(
     input_path: str,
     output_fence_path: Optional[str] = None,
     output_grids_dir: Optional[str] = None,
-    wgs84_epsilon: float = 0.01,
+    grid_resolution: float = 0.01,
+    compress_pcd: bool = False,
     center: Optional[Tuple[float, float, float]] = None,
 ):
     assert (
@@ -177,7 +194,8 @@ def condense_pointcloud(
         pcd=pcd,
         output_fence_path=output_fence_path,
         output_grids_dir=output_grids_dir,
-        wgs84_epsilon=wgs84_epsilon,
+        grid_resolution=grid_resolution,
+        compress_pcd=compress_pcd,
     )
 
 
