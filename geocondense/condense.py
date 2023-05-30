@@ -152,7 +152,7 @@ def condense(
 ) -> Dict[str, str]:
     assert not (
         semantic_files is None and pointcloud_files is None
-    ), "should specify either --semantic_files or --pointcloud_files"
+    ), "should specify either --semantic_files or --pointcloud_files (or both)"
     semantic_files = semantic_files or []
     pointcloud_files = pointcloud_files or []
     logger.info(f"semantic files: {semantic_files} (#{len(semantic_files)})")
