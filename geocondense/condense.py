@@ -13,7 +13,8 @@ from loguru import logger
 from geocondense.condense_geojson import condense_geojson
 from geocondense.condense_pointcloud import condense_pointcloud_impl
 from geocondense.dissect_geojson import dissect_geojson
-from geocondense.utils import md5sum, read_json, write_json
+from geocondense.utils import read_json, write_json
+from geocondense.utils import md5sum as default_md5sum
 
 
 def resolve_center(
@@ -149,6 +150,7 @@ def condense(
     # handlers
     handle_semantic=default_handle_semantic,
     handle_pointcloud=default_handle_pointcloud,
+    md5sum=default_md5sum,
 ) -> Dict[str, str]:
     assert not (
         semantic_files is None and pointcloud_files is None
