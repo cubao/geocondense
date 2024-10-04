@@ -28,6 +28,11 @@
 #include "h3api.h"
 #include "cubao/polyline_ruler.hpp"
 #include "spdlog/spdlog.h"
+// fix exposed macro 'GetObject' from wingdi.h (included by spdlog.h) under
+// windows, see https://github.com/Tencent/rapidjson/issues/1448
+#ifdef GetObject
+#undef GetObject
+#endif
 
 #include <unordered_map>
 #include <set>
@@ -37,8 +42,9 @@
 
 namespace py = pybind11;
 using namespace pybind11::literals;
-using namespace cubao;
 
+namespace cubao
+{
 using RapidjsonValue = mapbox::geojson::rapidjson_value;
 using RapidjsonAllocator = mapbox::geojson::rapidjson_allocator;
 using RapidjsonDocument = mapbox::geojson::rapidjson_document;
@@ -179,9 +185,9 @@ inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
 {
     geom.match(
         [&](const mapbox::geojson::line_string &ls) {
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
@@ -197,25 +203,25 @@ inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
         },
         [&](const mapbox::geojson::polygon &g) {
             auto &ls = g[0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
         [&](const mapbox::geojson::multi_line_string &g) {
             auto &ls = g[0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
         [&](const mapbox::geojson::multi_polygon &g) {
             auto &ls = g[0][0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
@@ -459,9 +465,10 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
         RapidjsonValue properties(rapidjson::kObjectType);
         f.geometry.match(
             [&](const mapbox::geojson::line_string &ls) {
-                auto llas = douglas_simplify(
-                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3),
-                    options.douglas_epsilon, true);
+                RowVectors src =
+                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+                auto llas =
+                    douglas_simplify(src, options.douglas_epsilon, true);
                 mapbox::geojson::line_string geom;
                 geom.resize(llas.rows());
                 Eigen::Map<RowVectors>(&geom[0].x, geom.size(), 3) = llas;
@@ -746,23 +753,32 @@ bool dissect_geojson(const std::string &input_path,
     }
     return true;
 }
+} // namespace cubao
 
-PYBIND11_MODULE(pybind11_geocondense, m)
+PYBIND11_MODULE(_core, m)
 {
+    using namespace cubao;
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
-        .def(py::init<>())
-        .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon)
+        .def(py::init<>(), "Default constructor for CondenseOptions")
+        .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon,
+                       "Epsilon value for Douglas-Peucker algorithm")
         .def_readwrite("grid_h3_resolution",
-                       &CondenseOptions::grid_h3_resolution)
-        .def_readwrite("indent", &CondenseOptions::indent)
-        .def_readwrite("sort_keys", &CondenseOptions::sort_keys)
+                       &CondenseOptions::grid_h3_resolution,
+                       "H3 resolution for grid features")
+        .def_readwrite("indent", &CondenseOptions::indent,
+                       "Indentation option for JSON output")
+        .def_readwrite("sort_keys", &CondenseOptions::sort_keys,
+                       "Option to sort keys in JSON output")
         .def_readwrite("grid_features_keep_properties",
-                       &CondenseOptions::grid_features_keep_properties)
+                       &CondenseOptions::grid_features_keep_properties,
+                       "Option to keep properties for grid features")
         .def_readwrite("sparsify_h3_resolution",
-                       &CondenseOptions::sparsify_h3_resolution)
+                       &CondenseOptions::sparsify_h3_resolution,
+                       "H3 resolution for sparsification")
         .def_readwrite("sparsify_upper_limit",
-                       &CondenseOptions::sparsify_upper_limit)
-        .def_readwrite("debug", &CondenseOptions::debug)
+                       &CondenseOptions::sparsify_upper_limit,
+                       "Upper limit for sparsification")
+        .def_readwrite("debug", &CondenseOptions::debug, "Debug option")
         //
         ;
 
@@ -772,7 +788,20 @@ PYBIND11_MODULE(pybind11_geocondense, m)
           "output_index_path"_a = std::nullopt,  //
           "output_strip_path"_a = std::nullopt,  //
           "output_grids_dir"_a = std::nullopt,   //
-          "options"_a = CondenseOptions())
+          "options"_a = CondenseOptions(),       //
+          R"docstring(
+          Condense GeoJSON data.
+
+          Args:
+              input_path: Path to the input GeoJSON file.
+              output_index_path: Optional path for the output index file.
+              output_strip_path: Optional path for the output strip file.
+              output_grids_dir: Optional directory for output grid files.
+              options: CondenseOptions object with configuration options.
+
+          Returns:
+              bool: True if the operation was successful, False otherwise.
+          )docstring")
         //
         ;
 
@@ -783,7 +812,21 @@ PYBIND11_MODULE(pybind11_geocondense, m)
           "output_properties"_a = std::nullopt,   //
           "output_observations"_a = std::nullopt, //
           "output_others"_a = std::nullopt,       //
-          "indent"_a = false)
+          "indent"_a = false,                     //
+          R"docstring(
+          Dissect GeoJSON data into separate components.
+
+          Args:
+              input_path: Path to the input GeoJSON file.
+              output_geometry: Optional path for the output geometry file.
+              output_properties: Optional path for the output properties file.
+              output_observations: Optional path for the output observations file.
+              output_others: Optional path for other output data.
+              indent: Boolean flag to enable indentation in output JSON.
+
+          Returns:
+              bool: True if the operation was successful, False otherwise.
+          )docstring")
         //
         ;
 

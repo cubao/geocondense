@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import os
 from pprint import pprint
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 from geocondense import CondenseOptions
-from geocondense import condense_geojson as condense_geojson_impl
+
+from ._core import condense_geojson as condense_geojson_impl
 
 
 def condense_geojson(
@@ -47,8 +49,9 @@ def condense_geojson(
         options=options,
     )
     if not succ:
-        pprint(locals())
-        raise Exception(f"failed to condense geojson: {input_path}")
+        pprint(locals())  # noqa: T203
+        msg = f"failed to condense geojson: {input_path}"
+        raise Exception(msg)
 
 
 if __name__ == "__main__":

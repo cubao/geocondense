@@ -1,25 +1,26 @@
+from __future__ import annotations
+
 import argparse
 import glob
 import json
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import open3d as o3d
-import polyline_ruler.tf as tf
 from loguru import logger
+from polyline_ruler import tf
 
 from geocondense.condense_geojson import condense_geojson
 from geocondense.condense_pointcloud import condense_pointcloud_impl
 from geocondense.dissect_geojson import dissect_geojson
-from geocondense.utils import read_json, write_json
 from geocondense.utils import md5sum as default_md5sum
+from geocondense.utils import read_json, write_json
 
 
 def resolve_center(
-    center: Optional[Union[str, Tuple[float, float, float]]]
-) -> Optional[Tuple[float, float, float]]:
+    center: str | tuple[float, float, float] | None,
+) -> tuple[float, float, float] | None:
     if not center:
         return None
     if isinstance(center, str):
@@ -34,8 +35,8 @@ def default_handle_semantic(
     *,
     workdir: str,
     uuid: str,
-    center: Optional[Tuple[float, float, float]],
-) -> Tuple[str, str]:
+    center: tuple[float, float, float] | None,
+) -> tuple[str, str]:
     dissect_input_path = path
     condense_input_path = path
     return dissect_input_path, condense_input_path
@@ -46,7 +47,7 @@ def default_handle_pointcloud(
     *,
     workdir: str,
     uuid: str,
-    center: Optional[Tuple[float, float, float]],
+    center: tuple[float, float, float] | None,
 ) -> o3d.geometry.PointCloud:
     pcd = o3d.io.read_point_cloud(path)
     if center:
@@ -144,14 +145,14 @@ def condense_pointcloud(
 def condense(
     *,
     workdir: str,
-    semantic_files: List[str] = None,
-    pointcloud_files: List[str] = None,
-    center: Optional[Tuple[float, float, float]] = None,
+    semantic_files: list[str] = None,
+    pointcloud_files: list[str] = None,
+    center: tuple[float, float, float] | None = None,
     # handlers
     handle_semantic=default_handle_semantic,
     handle_pointcloud=default_handle_pointcloud,
     md5sum=default_md5sum,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     assert not (
         semantic_files is None and pointcloud_files is None
     ), "should specify either --semantic_files or --pointcloud_files (or both)"
@@ -236,10 +237,10 @@ def main(
     )
     args = parser.parse_args()
     workdir: str = args.workdir
-    semantic_files: List[str] = args.semantic_files
-    pointcloud_files: List[str] = args.pointcloud_files
-    center: Optional[str] = args.center
-    export: Optional[str] = args.export
+    semantic_files: list[str] = args.semantic_files
+    pointcloud_files: list[str] = args.pointcloud_files
+    center: str | None = args.center
+    export: str | None = args.export
     args = None
 
     index = condense(

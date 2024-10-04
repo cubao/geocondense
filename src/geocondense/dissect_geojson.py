@@ -1,17 +1,18 @@
+from __future__ import annotations
+
 import os
 from pprint import pprint
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
-from geocondense import dissect_geojson as dissect_geojson_impl
+from geocondense._core import dissect_geojson as dissect_geojson_impl
 
 
 def dissect_geojson(
     *,
     input_path: str,
-    output_geometry: Optional[str] = None,
-    output_properties: Optional[str] = None,
-    output_observations: Optional[str] = None,
-    output_others: Optional[str] = None,
+    output_geometry: str | None = None,
+    output_properties: str | None = None,
+    output_observations: str | None = None,
+    output_others: str | None = None,
     indent: bool = False,
 ):
     # mkdir -p
@@ -36,8 +37,9 @@ def dissect_geojson(
         indent=indent,
     )
     if not succ:
-        pprint(locals())
-        raise Exception(f"failed to dissect geojson: {input_path}")
+        pprint(locals())  # noqa: T203
+        msg = f"failed to dissect geojson: {input_path}"
+        raise Exception(msg)
 
 
 if __name__ == "__main__":

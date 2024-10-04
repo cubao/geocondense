@@ -1,9 +1,11 @@
-cmake_minimum_required(VERSION 3.4...3.18)
-project(geocondense)
+cmake_minimum_required(VERSION 3.15...3.27)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+project(
+  ${SKBUILD_PROJECT_NAME}
+  VERSION ${SKBUILD_PROJECT_VERSION}
+  LANGUAGES C CXX)
 
+# set(CMAKE_BUILD_TYPE "Debug")
 if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE
       "Release"
@@ -20,19 +22,20 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 endif()
 
-include_directories(
-  ${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}/h3/src/h3lib/include
-  ${PROJECT_SOURCE_DIR}/headers/include)
-
-configure_file(h3/src/h3lib/include/h3api.h.in ${PROJECT_BINARY_DIR}/h3api.h)
-file(GLOB H3SOURCES h3/src/h3lib/lib/*.c)
-# add_library(h3 STATIC ${H3SOURCES})
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_STANDARD 17)
-set(PYBIND11_CPP_STANDARD -std=c++17)
-add_subdirectory(pybind11)
-pybind11_add_module(pybind11_geocondense src/main.cpp ${H3SOURCES})
+include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/headers/include)
+include_directories(${PROJECT_BINARY_DIR}
+                    ${PROJECT_SOURCE_DIR}/src/h3lib/include)
 
-# target_link_libraries(pybind11_geocondense h3)
-target_compile_definitions(pybind11_geocondense
-                           PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})
+configure_file(src/h3lib/include/h3api.h.in ${PROJECT_BINARY_DIR}/h3api.h)
+file(GLOB H3SOURCES src/h3lib/lib/*.c)
+
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)
+python_add_library(_core MODULE src/main.cpp ${H3SOURCES} WITH_SOABI)
+target_link_libraries(_core PRIVATE pybind11::headers)
+target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
+install(TARGETS _core DESTINATION ${PROJECT_NAME})

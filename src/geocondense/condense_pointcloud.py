@@ -1,21 +1,21 @@
+from __future__ import annotations
+
 import json
 import os
 from itertools import chain
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import numpy as np
 import open3d as o3d
-import polyline_ruler.tf as tf
 from concave_hull import concave_hull_indexes
 from loguru import logger
-from pybind11_rdp import rdp_mask
+from polyline_ruler import douglas_simplify_mask, tf
 
 
 def condense_pointcloud_impl(
     *,
     pcd: o3d.geometry.PointCloud,
-    output_fence_path: Optional[str] = None,
-    output_grids_dir: Optional[str] = None,
+    output_fence_path: str | None = None,
+    output_grids_dir: str | None = None,
     grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
 ):
@@ -103,7 +103,7 @@ def condense_pointcloud_impl(
     llas = tf.enu2lla(points[concave_hull], anchor_lla=anchor)
     llas[:, :2] = llas[:, :2].round(6)
     llas[:, 2] = llas[:, 2].round(1)
-    mask = rdp_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
+    mask = douglas_simplify_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
     llas = llas[mask]
     os.makedirs(os.path.dirname(os.path.abspath(output_fence_path)), exist_ok=True)
     with open(output_fence_path, "w") as f:
@@ -136,8 +136,8 @@ def condense_pointcloud_impl(
         return
     output_grids_dir = os.path.abspath(output_grids_dir)
     os.makedirs(output_grids_dir, exist_ok=True)
-    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):  # noqa
-        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):  # noqa
+    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):
+        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):
             mask = np.logical_and(
                 np.logical_and(x0 <= xyzs[:, 0], xyzs[:, 0] < x1),
                 np.logical_and(y0 <= xyzs[:, 1], xyzs[:, 1] < y1),
@@ -145,7 +145,7 @@ def condense_pointcloud_impl(
             if not np.any(mask):
                 continue
             related = [idxes[i] for i in np.where(mask)[0]]
-            related = sorted(list(chain.from_iterable(related)))
+            related = sorted(chain.from_iterable(related))
             grid = o3d.geometry.PointCloud()
             grid.points = o3d.utility.Vector3dVector(enus[related])
             grid.colors = o3d.utility.Vector3dVector(rgbs[related])
@@ -172,11 +172,11 @@ def condense_pointcloud_impl(
 def condense_pointcloud(
     *,
     input_path: str,
-    output_fence_path: Optional[str] = None,
-    output_grids_dir: Optional[str] = None,
+    output_fence_path: str | None = None,
+    output_grids_dir: str | None = None,
     grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
-    center: Optional[Tuple[float, float, float]] = None,
+    center: tuple[float, float, float] | None = None,
 ):
     assert (
         output_fence_path or output_grids_dir
