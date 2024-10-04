@@ -754,19 +754,26 @@ PYBIND11_MODULE(_core, m)
 {
     using namespace cubao;
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
-        .def(py::init<>())
-        .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon)
+        .def(py::init<>(), "Default constructor for CondenseOptions")
+        .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon,
+                       "Epsilon value for Douglas-Peucker algorithm")
         .def_readwrite("grid_h3_resolution",
-                       &CondenseOptions::grid_h3_resolution)
-        .def_readwrite("indent", &CondenseOptions::indent)
-        .def_readwrite("sort_keys", &CondenseOptions::sort_keys)
+                       &CondenseOptions::grid_h3_resolution,
+                       "H3 resolution for grid features")
+        .def_readwrite("indent", &CondenseOptions::indent,
+                       "Indentation option for JSON output")
+        .def_readwrite("sort_keys", &CondenseOptions::sort_keys,
+                       "Option to sort keys in JSON output")
         .def_readwrite("grid_features_keep_properties",
-                       &CondenseOptions::grid_features_keep_properties)
+                       &CondenseOptions::grid_features_keep_properties,
+                       "Option to keep properties for grid features")
         .def_readwrite("sparsify_h3_resolution",
-                       &CondenseOptions::sparsify_h3_resolution)
+                       &CondenseOptions::sparsify_h3_resolution,
+                       "H3 resolution for sparsification")
         .def_readwrite("sparsify_upper_limit",
-                       &CondenseOptions::sparsify_upper_limit)
-        .def_readwrite("debug", &CondenseOptions::debug)
+                       &CondenseOptions::sparsify_upper_limit,
+                       "Upper limit for sparsification")
+        .def_readwrite("debug", &CondenseOptions::debug, "Debug option")
         //
         ;
 
@@ -776,7 +783,20 @@ PYBIND11_MODULE(_core, m)
           "output_index_path"_a = std::nullopt,  //
           "output_strip_path"_a = std::nullopt,  //
           "output_grids_dir"_a = std::nullopt,   //
-          "options"_a = CondenseOptions())
+          "options"_a = CondenseOptions(),       //
+          R"docstring(
+          Condense GeoJSON data.
+
+          Args:
+              input_path: Path to the input GeoJSON file.
+              output_index_path: Optional path for the output index file.
+              output_strip_path: Optional path for the output strip file.
+              output_grids_dir: Optional directory for output grid files.
+              options: CondenseOptions object with configuration options.
+
+          Returns:
+              bool: True if the operation was successful, False otherwise.
+          )docstring")
         //
         ;
 
@@ -787,7 +807,21 @@ PYBIND11_MODULE(_core, m)
           "output_properties"_a = std::nullopt,   //
           "output_observations"_a = std::nullopt, //
           "output_others"_a = std::nullopt,       //
-          "indent"_a = false)
+          "indent"_a = false,                     //
+          R"docstring(
+          Dissect GeoJSON data into separate components.
+
+          Args:
+              input_path: Path to the input GeoJSON file.
+              output_geometry: Optional path for the output geometry file.
+              output_properties: Optional path for the output properties file.
+              output_observations: Optional path for the output observations file.
+              output_others: Optional path for other output data.
+              indent: Boolean flag to enable indentation in output JSON.
+
+          Returns:
+              bool: True if the operation was successful, False otherwise.
+          )docstring")
         //
         ;
 
