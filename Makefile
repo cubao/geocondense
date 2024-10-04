@@ -36,8 +36,10 @@ python_wheel:
 python_build: python_wheel
 python_sdist:
 	$(PYTHON) -m pip sdist . --verbose
-python_test: pytest
-.PHONY: build
+python_test:
+	$(PYTHON) -m pip install pytest
+	pytest tests
+.PHONY: build python_install python_wheel python_build python_sdist python_test
 
 restub:
 	pybind11-stubgen fast_viterbi._core -o stubs
