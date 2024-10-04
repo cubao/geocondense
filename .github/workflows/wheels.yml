@@ -56,7 +56,7 @@ jobs:
         CIBW_ARCHS_MACOS: universal2
         CIBW_ARCHS_WINDOWS: auto ARM64
         CIBW_SKIP: pp* *i686 *musllinux*
-        CIBW_TEST_SKIP: "*macosx* *win* *aarch64"
+        CIBW_TEST_SKIP: "*"
 
     - name: Verify clean directory
       run: git diff --exit-code
