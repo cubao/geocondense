@@ -145,7 +145,7 @@ def condense_pointcloud_impl(
             if not np.any(mask):
                 continue
             related = [idxes[i] for i in np.where(mask)[0]]
-            related = sorted(list(chain.from_iterable(related)))
+            related = sorted(chain.from_iterable(related))
             grid = o3d.geometry.PointCloud()
             grid.points = o3d.utility.Vector3dVector(enus[related])
             grid.colors = o3d.utility.Vector3dVector(rgbs[related])

@@ -100,6 +100,7 @@ ignore = [
   "PTH207",
   "RUF013",
   "T201",
+  "RUF005",
 ]
 isort.required-imports = ["from __future__ import annotations"]
 

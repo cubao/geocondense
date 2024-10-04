@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pprint import pprint
 
-from geocondense import dissect_geojson as dissect_geojson_impl
+from geocondense._core import dissect_geojson as dissect_geojson_impl
 
 
 def dissect_geojson(
@@ -37,8 +37,9 @@ def dissect_geojson(
         indent=indent,
     )
     if not succ:
-        pprint(locals())
-        raise Exception(f"failed to dissect geojson: {input_path}")
+        pprint(locals())  # noqa: T203
+        msg = f"failed to dissect geojson: {input_path}"
+        raise Exception(msg)
 
 
 if __name__ == "__main__":
