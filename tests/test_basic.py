@@ -1,6 +1,6 @@
 import os  # noqa
 
-from geocondense import CondenseOptions, __version__, condense_geojson  # noqa
+from geocondense import __version__
 
 
 def test_dummy():
