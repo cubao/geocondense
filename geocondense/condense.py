@@ -18,7 +18,7 @@ from geocondense.utils import md5sum as default_md5sum
 
 
 def resolve_center(
-    center: Optional[Union[str, Tuple[float, float, float]]]
+    center: Optional[Union[str, Tuple[float, float, float]]],
 ) -> Optional[Tuple[float, float, float]]:
     if not center:
         return None
