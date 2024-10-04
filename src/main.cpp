@@ -750,7 +750,7 @@ bool dissect_geojson(const std::string &input_path,
 }
 } // namespace cubao
 
-PYBIND11_MODULE(pybind11_geocondense, m)
+PYBIND11_MODULE(_core, m)
 {
     using namespace cubao;
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
