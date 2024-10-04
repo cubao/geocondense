@@ -95,7 +95,13 @@
         "future": "cpp",
         "regex": "cpp",
         "core": "cpp",
-        "jacobi": "cpp"
+        "jacobi": "cpp",
+        "__verbose_abort": "cpp",
+        "charconv": "cpp",
+        "execution": "cpp",
+        "latch": "cpp",
+        "shared_mutex": "cpp",
+        "span": "cpp"
     },
     "workbench.colorCustomizations": {
         "activityBar.background": "#143328",
