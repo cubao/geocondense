@@ -21,16 +21,19 @@ DOCKER_TAG_WINDOWS ?= ghcr.io/cubao/build-env-windows-x64:v0.0.1
 DOCKER_TAG_LINUX ?= ghcr.io/cubao/build-env-manylinux2014-x64:v0.0.1
 DOCKER_TAG_MACOS ?= ghcr.io/cubao/build-env-macos-arm64:v0.0.1
 
+test_in_arg ?= --rm --name geocondense -w `pwd` -v `pwd`:`pwd`
 test_in_win:
-	docker run --rm -w `pwd` -v `pwd`:`pwd` -v `pwd`/build/win:`pwd`/build -it $(DOCKER_TAG_WINDOWS) bash
+	docker run $(test_in_arg) -v `pwd`/build/win:`pwd`/build -it $(DOCKER_TAG_WINDOWS) bash
 test_in_mac:
-	docker run --rm -w `pwd` -v `pwd`:`pwd` -v `pwd`/build/mac:`pwd`/build -it $(DOCKER_TAG_MACOS) bash
+	docker run $(test_in_arg) -v `pwd`/build/mac:`pwd`/build -it $(DOCKER_TAG_MACOS) bash
 test_in_linux:
-	docker run --rm -w `pwd` -v `pwd`:`pwd` -v `pwd`/build/linux:`pwd`/build -it $(DOCKER_TAG_LINUX) bash
+	docker run $(test_in_arg) -v `pwd`/build/linux:`pwd`/build -it $(DOCKER_TAG_LINUX) bash
 
 PYTHON ?= python3
 python_install:
 	$(PYTHON) setup.py install
+python_fast_install:
+	$(PYTHON) setup.py install --no-deps
 python_build:
 	$(PYTHON) setup.py bdist_wheel
 python_sdist:

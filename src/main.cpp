@@ -262,7 +262,7 @@ index_geojson(const mapbox::geojson::feature_collection &_features)
         auto id_itr = props.find("id");
         if (id_itr != props.end() && id_itr->second.is<std::string>()) {
             ids.push_back(id_itr->second);
-        } else if (!f.id.is<std::string>()) {
+        } else if (f.id.is<std::string>()) {
             ids.push_back(f.id.get<std::string>());
         } else {
             ids.push_back(mapbox::feature::null_value);
@@ -432,7 +432,7 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
             h3_type_idx[h3idx][type].push_back(i);
         }
     }
-    auto rng = std::default_random_engine{};
+    auto rng = std::default_random_engine{0}; // seed 0
     for (auto &pair : h3_type_idx) {
         for (auto &id_idx : pair.second) {
             auto &idxes = id_idx.second;

@@ -9,7 +9,6 @@ import polyline_ruler.tf as tf
 from concave_hull import concave_hull_indexes
 from loguru import logger
 from pybind11_rdp import rdp_mask
-from scipy.spatial import ConvexHull
 
 
 def condense_pointcloud_impl(
@@ -96,10 +95,8 @@ def condense_pointcloud_impl(
             *(xyzs + [0, -0.1, 0]),
         ]
     )
-    convex_hull = ConvexHull(points[:, :2])
     concave_hull = concave_hull_indexes(
         points[:, :2],
-        convex_hull_indexes=convex_hull.vertices.astype(np.int32),
         length_threshold=2.0,
     )
     concave_hull = [*concave_hull, concave_hull[0]]
