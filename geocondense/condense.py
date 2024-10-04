@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import glob
 import json
@@ -7,14 +9,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import open3d as o3d
-import polyline_ruler.tf as tf
 from loguru import logger
+from polyline_ruler import tf
 
 from geocondense.condense_geojson import condense_geojson
 from geocondense.condense_pointcloud import condense_pointcloud_impl
 from geocondense.dissect_geojson import dissect_geojson
-from geocondense.utils import read_json, write_json
 from geocondense.utils import md5sum as default_md5sum
+from geocondense.utils import read_json, write_json
 
 
 def resolve_center(

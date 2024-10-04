@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 from itertools import chain
@@ -5,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import numpy as np
 import open3d as o3d
-import polyline_ruler.tf as tf
 from concave_hull import concave_hull_indexes
 from loguru import logger
+from polyline_ruler import tf
 from pybind11_rdp import rdp_mask
 
 
@@ -136,8 +138,8 @@ def condense_pointcloud_impl(
         return
     output_grids_dir = os.path.abspath(output_grids_dir)
     os.makedirs(output_grids_dir, exist_ok=True)
-    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):  # noqa
-        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):  # noqa
+    for ii, (x0, x1) in enumerate(zip(xs[:-1], xs[1:])):
+        for jj, (y0, y1) in enumerate(zip(ys[:-1], ys[1:])):
             mask = np.logical_and(
                 np.logical_and(x0 <= xyzs[:, 0], xyzs[:, 0] < x1),
                 np.logical_and(y0 <= xyzs[:, 1], xyzs[:, 1] < y1),
