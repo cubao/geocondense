@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pprint import pprint
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 from geocondense import CondenseOptions
 from geocondense import condense_geojson as condense_geojson_impl

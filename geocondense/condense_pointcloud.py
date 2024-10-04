@@ -3,21 +3,19 @@ from __future__ import annotations
 import json
 import os
 from itertools import chain
-from typing import Any, Dict, List, Optional, Set, Tuple, Union  # noqa
 
 import numpy as np
 import open3d as o3d
 from concave_hull import concave_hull_indexes
 from loguru import logger
-from polyline_ruler import tf
-from pybind11_rdp import rdp_mask
+from polyline_ruler import douglas_simplify_mask, tf
 
 
 def condense_pointcloud_impl(
     *,
     pcd: o3d.geometry.PointCloud,
-    output_fence_path: Optional[str] = None,
-    output_grids_dir: Optional[str] = None,
+    output_fence_path: str | None = None,
+    output_grids_dir: str | None = None,
     grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
 ):
@@ -105,7 +103,7 @@ def condense_pointcloud_impl(
     llas = tf.enu2lla(points[concave_hull], anchor_lla=anchor)
     llas[:, :2] = llas[:, :2].round(6)
     llas[:, 2] = llas[:, 2].round(1)
-    mask = rdp_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
+    mask = douglas_simplify_mask(tf.lla2enu(llas), epsilon=0.5).astype(bool)
     llas = llas[mask]
     os.makedirs(os.path.dirname(os.path.abspath(output_fence_path)), exist_ok=True)
     with open(output_fence_path, "w") as f:
@@ -174,11 +172,11 @@ def condense_pointcloud_impl(
 def condense_pointcloud(
     *,
     input_path: str,
-    output_fence_path: Optional[str] = None,
-    output_grids_dir: Optional[str] = None,
+    output_fence_path: str | None = None,
+    output_grids_dir: str | None = None,
     grid_resolution: float = 0.0001,
     compress_pcd: bool = False,
-    center: Optional[Tuple[float, float, float]] = None,
+    center: tuple[float, float, float] | None = None,
 ):
     assert (
         output_fence_path or output_grids_dir
