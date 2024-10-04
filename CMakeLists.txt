@@ -33,10 +33,6 @@ include_directories(${PROJECT_BINARY_DIR}
 configure_file(src/h3lib/include/h3api.h.in ${PROJECT_BINARY_DIR}/h3api.h)
 file(GLOB H3SOURCES src/h3lib/lib/*.c)
 
-add_library(${PROJECT_NAME} src/main.cpp ${H3SOURCES})
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET "hidden")
-install(TARGETS ${PROJECT_NAME} DESTINATION ${PROJECT_NAME})
-
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 python_add_library(_core MODULE src/main.cpp ${H3SOURCES} WITH_SOABI)

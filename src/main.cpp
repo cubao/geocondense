@@ -37,8 +37,9 @@
 
 namespace py = pybind11;
 using namespace pybind11::literals;
-using namespace cubao;
 
+namespace cubao
+{
 using RapidjsonValue = mapbox::geojson::rapidjson_value;
 using RapidjsonAllocator = mapbox::geojson::rapidjson_allocator;
 using RapidjsonDocument = mapbox::geojson::rapidjson_document;
@@ -179,9 +180,9 @@ inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
 {
     geom.match(
         [&](const mapbox::geojson::line_string &ls) {
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
@@ -197,25 +198,25 @@ inline void index_geometry(int index, const mapbox::geojson::geometry &geom,
         },
         [&](const mapbox::geojson::polygon &g) {
             auto &ls = g[0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
         [&](const mapbox::geojson::multi_line_string &g) {
             auto &ls = g[0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
         [&](const mapbox::geojson::multi_polygon &g) {
             auto &ls = g[0][0];
-            auto llas = douglas_simplify(
-                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3), 1.0,
-                true);
+            RowVectors src =
+                Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+            auto llas = douglas_simplify(src, 1.0, true);
             positions.push_back(llas.row(llas.rows() / 2));
             polylines.emplace(index, std::move(llas));
         },
@@ -459,9 +460,10 @@ strip_geojson(const mapbox::geojson::feature_collection &_features,
         RapidjsonValue properties(rapidjson::kObjectType);
         f.geometry.match(
             [&](const mapbox::geojson::line_string &ls) {
-                auto llas = douglas_simplify(
-                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3),
-                    options.douglas_epsilon, true);
+                RowVectors src =
+                    Eigen::Map<const RowVectors>(&ls[0].x, ls.size(), 3);
+                auto llas =
+                    douglas_simplify(src, options.douglas_epsilon, true);
                 mapbox::geojson::line_string geom;
                 geom.resize(llas.rows());
                 Eigen::Map<RowVectors>(&geom[0].x, geom.size(), 3) = llas;
@@ -746,9 +748,11 @@ bool dissect_geojson(const std::string &input_path,
     }
     return true;
 }
+} // namespace cubao
 
 PYBIND11_MODULE(pybind11_geocondense, m)
 {
+    using namespace cubao;
     py::class_<CondenseOptions>(m, "CondenseOptions", py::module_local()) //
         .def(py::init<>())
         .def_readwrite("douglas_epsilon", &CondenseOptions::douglas_epsilon)
