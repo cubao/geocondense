@@ -24,9 +24,18 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
+dependencies = [
+  "concave_hull",
+  "fire",
+  "loguru",
+  "numpy",
+  "open3d",
+  "polyline_ruler",
+]
+
 
 [project.optional-dependencies]
-test = ["pytest", "scipy"]
+test = ["pytest"]
 
 
 [tool.scikit-build]
