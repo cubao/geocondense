@@ -35,7 +35,13 @@ file(GLOB H3SOURCES src/h3lib/lib/*.c)
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -c
+          "import cubao_headers; print(cubao_headers.get_include())"
+  OUTPUT_VARIABLE CUBAO_HEADERS_INCLUDE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
 python_add_library(_core MODULE src/main.cpp ${H3SOURCES} WITH_SOABI)
+target_include_directories(_core PRIVATE src "${CUBAO_HEADERS_INCLUDE_DIR}")
 target_link_libraries(_core PRIVATE pybind11::headers)
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 install(TARGETS _core DESTINATION ${PROJECT_NAME})

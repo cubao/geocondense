@@ -1,12 +1,11 @@
 [build-system]
-requires = ["scikit-build-core>=0.3.3", "pybind11"]
+requires = ["scikit-build-core>=0.3.3", "pybind11", "cubao-headers>=0.1.0"]
 build-backend = "scikit_build_core.build"
 
 
 [project]
 name = "geocondense"
 version = "0.0.5"
-url = "https://github.com/cubao/geocondense"
 description="geocondense"
 readme = "README.md"
 authors = [
@@ -34,6 +33,9 @@ dependencies = [
   "open3d",
   "polyline_ruler",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cubao/geocondense"
 
 
 [project.optional-dependencies]
